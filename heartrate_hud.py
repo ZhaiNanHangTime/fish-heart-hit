@@ -570,18 +570,41 @@ class HeartHud:
             }
 
         self.ghost_float = self._quantize_unit(0)
-        grow = max(1, round(u * 0.16))
         uu = round(u)
-        gy0 = round(oy + self.ghost_float)
         x0 = round(ox + self.ghost_xoff * u)
+        y0 = round(oy + self.ghost_float)
+        t = max(1, round(uu * 0.22))            # 轮廓厚度（像素）
 
-        for gx, gy, ch, edge, fill in self.ghost_cells:
+        # ---- 1) 先画轮廓条：只在中枢"朝空白的一侧" ----
+        # 注意：这里必须画在填充之前，否则会被相邻格的填充覆盖。
+        rows = GHOST_ROWS
+        for gx, gy, slot, item in self.ghost_out:
+            up = rows[gy - 1][gx] if gy > 0 else '.'
+            dn = rows[gy + 1][gx] if gy < GHOST_H - 1 else '.'
+            lf = rows[gy][gx - 1] if gx > 0 else '.'
+            rt = rows[gy][gx + 1] if gx < GHOST_W - 1 else '.'
             x = x0 + gx * uu
-            y = gy0 + gy * uu
-            self._show_rect(edge, palette['line'], x - grow, y - grow,
-                            uu + grow * 2, uu + grow * 2)
+            y = y0 + gy * uu
+            if slot == 'u' and up == '.':
+                self._pix_rect(item, palette['line'], x, y - t, uu, t)
+            elif slot == 'd' and dn == '.':
+                self._pix_rect(item, palette['line'], x, y + uu, uu, t)
+            elif slot == 'l' and lf == '.':
+                self._pix_rect(item, palette['line'], x - t, y, t, uu)
+            elif slot == 'r' and rt == '.':
+                self._pix_rect(item, palette['line'], x + uu, y, t, uu)
+            else:
+                self._hide(item)
+
+        # ---- 2) 再画填充：每格精确 uu×uu 像素，相邻格严丝合缝 ----
+        # 用 _pix_rect（区间原语）而不是 coords(x,y,x+w,y+h)——
+        # 后者右下边界是开区间，会短一像素，格缝处露出描边形成"网格颗粒感"。
+        for gx, gy, ch, fill in self.ghost_cells:
+            x = x0 + gx * uu
+            y = y0 + gy * uu
             # 网格里 '#' 表示身体，颜色表的键叫 'body'（与网页版 pixelShape 的兜底一致）
-            self._show_rect(fill, palette.get(ch) or palette['body'], x, y, uu, uu)
+            self._pix_rect(fill, palette.get(ch) or palette['body'], x, y, uu, uu)
+
         self._draw_status_and_digits()   # 数字与状态点：两套皮肤共用
 
     def _draw(self) -> None:
