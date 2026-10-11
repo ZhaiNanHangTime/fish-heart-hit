@@ -20,8 +20,8 @@
 ## 一、安装
 
 ```bash
-git clone https://github.com/<你的用户名>/heart-rate-live-hud.git
-cd heart-rate-live-hud
+git clone https://github.com/ZhaiNanHangTime/fish-heart-hit.git
+cd fish-heart-hit
 pip install -r requirements.txt
 ```
 
