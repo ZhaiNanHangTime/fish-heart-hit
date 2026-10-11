@@ -1,0 +1,195 @@
+/* ===========================================================
+   咸鱼突刺 · 共享主题
+   配色全部取自直播画面里的那条鱼，保证控制界面和叠层同源。
+   Signature = 像素切角面板（八边形裁角）+ 极淡 CRT 扫描线。
+   =========================================================== */
+
+:root {
+  /* 夜色山道 */
+  --ink:        #191d26;
+  --ink-2:      #20252f;
+  --ink-3:      #2a3140;
+  --edge:       #39414f;
+  --edge-soft:  #2c3340;
+
+  /* 鱼身米白（主文字，刻意不用纯白） */
+  --bone:       #e8e6df;
+  --bone-dim:   #a9a59b;
+  --ash:        #737b8c;
+
+  /* 三色信号 */
+  --tangerine:  #ff8a5c;   /* 鱼鳍橙 */
+  --ember:      #ff3b30;   /* 心率红 */
+  --jade:       #3ad6c8;   /* 连接青 */
+  --gold:       #ffd166;   /* 黄锚 */
+
+  --num:  "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+  --ui:   "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+
+  --cut: 9px;              /* 切角尺寸 */
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--bone);
+  font: 13px/1.6 var(--ui);
+  letter-spacing: .01em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 极淡 CRT 扫描线 —— 只加气氛，不干扰阅读 */
+body::after {
+  content: "";
+  position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+  background: repeating-linear-gradient(0deg,
+              rgba(255, 255, 255, .022) 0 1px, transparent 1px 3px);
+}
+
+/* ---------- 像素切角面板（signature） ---------- */
+.cut {
+  clip-path: polygon(
+    var(--cut) 0, calc(100% - var(--cut)) 0, 100% var(--cut),
+    100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%,
+    var(--cut) 100%, 0 calc(100% - var(--cut)), 0 var(--cut));
+}
+
+/* 面板本体：用 1px 内阴影当描边，避免 clip-path 吃掉 border */
+.panel {
+  background: var(--ink-2);
+  box-shadow: inset 0 0 0 1px var(--edge-soft);
+  padding: 16px 18px;
+}
+
+.panel-title {
+  font: 600 11px/1 var(--num);
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ash);
+  margin: 0 0 14px;
+  display: flex; align-items: center; gap: 8px;
+}
+.panel-title::before {
+  content: "";
+  width: 3px; height: 11px;
+  background: var(--tangerine);
+  box-shadow: 0 0 8px rgba(255, 138, 92, .55);
+}
+
+/* ---------- 字 ---------- */
+.num   { font-family: var(--num); font-variant-numeric: tabular-nums; }
+.label { color: var(--bone-dim); font-size: 12px; }
+.hint  { color: var(--ash); font-size: 11px; line-height: 1.7; }
+a { color: var(--tangerine); text-decoration: none; }
+a:hover { color: var(--gold); }
+
+/* ---------- 按钮：方形把手，不做圆角 ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  appearance: none; border: 0; cursor: pointer;
+  background: var(--ink-3);
+  color: var(--bone);
+  box-shadow: inset 0 0 0 1px var(--edge);
+  padding: 8px 14px;
+  font: 12px/1 var(--ui);
+  white-space: nowrap;
+  transition: background .12s, box-shadow .12s, transform .06s;
+}
+.btn:hover  { background: #333c4d; box-shadow: inset 0 0 0 1px var(--bone-dim); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 2px solid var(--jade); outline-offset: 2px; }
+
+.btn.primary { color: var(--ink); background: var(--tangerine); box-shadow: none; }
+.btn.primary:hover { background: #ffa077; }
+
+.btn.ghost { background: transparent; color: var(--bone-dim); }
+.btn.ghost:hover { background: var(--ink-3); color: var(--bone); }
+
+.btn.jade { color: var(--ink); background: var(--jade); box-shadow: none; }
+.btn.jade:hover { background: #63e6da; }
+
+/* ---------- 状态点 ---------- */
+.dot {
+  display: inline-block; width: 8px; height: 8px;
+  background: var(--ash);
+  margin-right: 7px; vertical-align: middle;
+}
+.dot.on  { background: var(--jade);  box-shadow: 0 0 9px var(--jade); }
+.dot.off { background: var(--ember); box-shadow: 0 0 9px var(--ember); }
+
+/* ---------- 表格 ---------- */
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th {
+  text-align: left; padding: 7px 9px;
+  color: var(--ash); font: 500 11px/1 var(--num);
+  letter-spacing: .12em; text-transform: uppercase;
+  border-bottom: 1px solid var(--edge);
+}
+td { padding: 7px 9px; border-bottom: 1px solid var(--edge-soft); }
+tbody tr:hover { background: #252b37; }
+td.num, th.num { text-align: right; font-family: var(--num); }
+
+/* ---------- 标签 ---------- */
+.tag { padding: 2px 7px; font: 11px/1.6 var(--num); letter-spacing: .04em; }
+.tag.good { background: rgba(58, 214, 200, .14); color: var(--jade); }
+.tag.mid  { background: rgba(255, 209, 102, .14); color: var(--gold); }
+.tag.bad  { background: rgba(255, 59, 48, .16);  color: #ff7a70; }
+
+/* ---------- 滑杆：方形把手 + 刻度感 ---------- */
+input[type=range] {
+  appearance: none; width: 100%; height: 20px; background: transparent; cursor: pointer;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 6px; background: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--edge);
+}
+input[type=range]::-webkit-slider-thumb {
+  appearance: none; width: 12px; height: 16px; margin-top: -5px;
+  background: var(--tangerine); border: 0;
+  box-shadow: 0 0 0 1px var(--ink), 0 0 10px rgba(255, 138, 92, .5);
+}
+input[type=range]::-moz-range-track {
+  height: 6px; background: var(--ink); box-shadow: inset 0 0 0 1px var(--edge);
+}
+input[type=range]::-moz-range-thumb {
+  width: 12px; height: 16px; background: var(--tangerine); border: 0;
+}
+input[type=range]:focus-visible { outline: 2px solid var(--jade); outline-offset: 4px; }
+
+input[type=checkbox] { accent-color: var(--tangerine); }
+
+/* ---------- 滚动条 ---------- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--ink); }
+::-webkit-scrollbar-thumb { background: var(--ink-3); box-shadow: inset 0 0 0 1px var(--edge); }
+::-webkit-scrollbar-thumb:hover { background: #3a4353; }
+
+/* ---------- 顶栏 ---------- */
+.topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 22px;
+  background: var(--ink-2);
+  box-shadow: inset 0 -1px 0 var(--edge);
+  position: sticky; top: 0; z-index: 50;
+}
+.topbar h1 {
+  margin: 0; font: 600 14px/1 var(--ui); letter-spacing: .06em;
+  display: flex; align-items: center; gap: 9px; white-space: nowrap;
+}
+.topbar h1 .fish { color: var(--tangerine); font-size: 16px; }
+.topbar .spacer { flex: 1; }
+
+/* 窄屏隐藏顶栏的说明文字，保证按钮不换行 */
+@media (max-width: 1180px) {
+  .topbar > .hint { display: none; }
+}
+@media (max-width: 900px) {
+  .topbar { flex-wrap: wrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+  body::after { display: none; }
+}

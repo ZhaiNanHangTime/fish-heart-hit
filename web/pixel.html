@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>咸鱼突刺 · 心率</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; background:transparent; overflow:hidden; }
+  canvas { display:block; width:100%; height:100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+/* =========================================================
+   咸鱼突刺 · 心率（极简透明版）
+   只有三样东西：红色心率线（横穿画面中央）、像素咸鱼、心率数字
+   没有背景框、没有统计、没有电量 —— 方便直接叠在游戏画面上
+   ========================================================= */
+
+const PAL = {
+  body:   '#e8e6df',
+  bodyHi: '#ffffff',
+  shade:  '#9aa3ad',
+  line:   '#2b2f36',
+  fin:    '#ff8a5c',
+  trace:  '#ff3b30',   // 心率线：红
+  traceDim:'#a01f18',
+  cool:   '#3ad6c8',
+  hot:    '#ffb03a',
+  danger: '#ff2f2f',
+  dim:    '#6b7787',
+};
+
+const FONT = {
+  '0':['111','101','101','101','111'], '1':['010','110','010','010','111'],
+  '2':['111','001','111','100','111'], '3':['111','001','111','001','111'],
+  '4':['101','101','111','001','001'], '5':['111','100','111','001','111'],
+  '6':['111','100','111','101','111'], '7':['111','001','001','001','001'],
+  '8':['111','101','111','101','111'], '9':['111','101','111','001','111'],
+  '-':['000','000','111','000','000'], ' ':['000','000','000','000','000'],
+};
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, dpr = 1;
+
+const params = new URLSearchParams(location.search);
+const SCALE = parseFloat(params.get('s') || '1');
+const PREVIEW_BG = params.get('bg') === '1';   // 预览用：铺一层深色底（方便在浅色页面上看效果）
+
+function fitCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  W = Math.max(160, rect.width);
+  H = Math.max(60, rect.height);
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+}
+window.addEventListener('resize', fitCanvas);
+
+function px(x, y, w, h, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+}
+
+/* ---------- 心率 → 颜色（连续渐变，不是跳档） ---------- */
+
+function mixColor(c1, c2, k) {
+  k = Math.max(0, Math.min(1, k));
+  const a = [1, 3, 5].map(i => parseInt(c1.substr(i, 2), 16));
+  const b = [1, 3, 5].map(i => parseInt(c2.substr(i, 2), 16));
+  return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * k).toString(16).padStart(2, '0')).join('');
+}
+
+/* =========================================================
+   冻结版算法（之后只做参数校准，不再改结构）
+
+   ┌ 颜色映射：个人基线 B ＋ 最近 10 分钟 P90 动态阈值
+   ├ 防假红 ：R ≥ B + 30
+   ├ 防抗红 ：R ≤ B + 45
+   ├ 慢更新 ：阈值按 15 秒时间常数缓慢跟随
+   ├ 视觉   ：强度做 Attack(2s) / Release(6s)
+   ├ 迟滞   ：连续 ≥ R 两秒才算满红，回落到 R−5 以下解除
+   ├ 离线   ：超过 5 秒没有新数据 → 显示离线，不沿用旧心率
+   └ 特效   ：30 秒内上涨 ≥10 bpm 且高于 B+15 → 触发一次，冷却 30 秒
+
+   数据本身不做任何滤波（手表读数可靠），只有"画面"做缓动。
+   ========================================================= */
+
+const P = {
+  baseFallback: 70,   // 攒够数据前的基线兜底
+  minGap: 22,         // R ≥ B + 22   防假红（实测甜点：满红 1.2 次/10min、假红 0）
+  maxGap: 30,         // R ≤ B + 30   防抗红（原来 45，实测让 R 顶到 114 而本人峰值才 104）
+  p90Offset: 3,       // R = P90 − 3
+  yellowAt: 0.4,      // 黄锚在 B→R 区间的位置（可在调参面板拖动）
+  orangeAt: 0.7,      // 橙锚位置
+  anchorTau: 15,      // 阈值慢更新时间常数（秒）
+  attack: 2.0,        // 上色时间常数（秒）
+  release: 6.0,       // 褪色时间常数（秒）
+  redHold: 2.0,       // 连续达阈值多久算满红
+  redDrop: 5,         // 回落多少解除满红
+  offlineAfter: 5,    // 多久没数据算离线
+  burstRise: 10,      // 窗口内涨多少触发特效
+  burstAbove: 15,     // 且要高于基线多少
+  burstWindow: 30,    // 涨幅观察窗口（秒）
+  burstCooldown: 30,  // 特效冷却（秒）
+};
+
+/* 调参入口：URL 参数覆盖 + 来自调校面板的 postMessage（改完即时生效，不用刷新）
+   例如  /?minGap=22&burstRise=8                                     */
+const TUNABLE = ['minGap', 'maxGap', 'p90Offset', 'yellowAt', 'orangeAt', 'anchorTau',
+                 'attack', 'release', 'redHold', 'redDrop', 'offlineAfter', 'burstRise',
+                 'burstAbove', 'burstWindow', 'burstCooldown'];
+function applyUrlParams() {
+  TUNABLE.forEach(k => {
+    const v = parseFloat(params.get(k));
+    if (!isNaN(v)) P[k] = v;
+  });
+  const sk = params.get('skin');           // 皮肤是字符串，单独处理
+  if (sk) P.skin = sk;
+}
+P.skin = 'fish';
+applyUrlParams();
+
+// 启动时读服务端保存的参数（/tune 里点过"保存"就生效）；URL 参数优先级最高
+fetch('/params').then(r => r.json()).then(p => {
+  if (p && typeof p === 'object') {
+    Object.keys(p).forEach(k => { if (TUNABLE.includes(k)) P[k] = p[k]; });
+    if (p.skin && !params.get('skin')) P.skin = p.skin;   // 皮肤：URL 优先于服务端
+  }
+  applyUrlParams();
+}).catch(() => {});
+window.addEventListener('message', ev => {
+  const msg = ev.data;
+  if (msg && msg.type === 'params' && msg.params) {
+    Object.keys(msg.params).forEach(k => {
+      const v = parseFloat(msg.params[k]);
+      if (TUNABLE.includes(k) && !isNaN(v)) P[k] = v;
+    });
+  }
+});
+
+let lockedBase = null;   // 服务端在开播头 3 分钟锁定后下发的基准，锁定后不再漂移
+
+function baseHeart(stats) {
+  if (lockedBase != null) return lockedBase;
+  const s = stats || {};
+  if ((s.samples || 0) >= 40 && s.min != null && s.avg != null) {
+    // 锁定前的临时估计：落在「本场最低」与「本场平均」之间偏平静的一侧（1/4 处）
+    return Math.max(45, s.min + (s.avg - s.min) * 0.25);
+  }
+  return P.baseFallback;
+}
+
+// 强度 0..1：B 为 0，满红阈值 R 为 1
+function intensityOf(bpm, anchors) {
+  if (bpm == null || !anchors) return 0;
+  return Math.max(0, Math.min(1, (bpm - anchors.B) / Math.max(1, anchors.R - anchors.B)));
+}
+
+// 强度 → 颜色：0 白 · yellowAt 黄 · orangeAt 橙 · 1 红
+function colorOfIntensity(p) {
+  const q = Math.max(0, p);
+  const y = P.yellowAt, o = P.orangeAt;
+  if (q <= y) return mixColor('#ffffff', '#ffe066', q / Math.max(0.05, y));
+  if (q <= o) return mixColor('#ffe066', '#ffa53a', (q - y) / Math.max(0.05, o - y));
+  return mixColor('#ffa53a', '#ff3b30', Math.min(1, (q - o) / Math.max(0.05, 1 - o)));
+}
+
+const algo = {
+  anchors: null,      // { B, R }
+  pSmooth: 0,         // 平滑后的强度
+  redSince: null,     // 满红迟滞计时
+  fullyRed: false,
+  burst: 0,           // 特效强度
+  lastBurstAt: -999,
+  track: [],          // 涨幅观察窗口
+};
+
+function updateAlgo(bpm, stats, recent, dt, offline) {
+  const now = performance.now() / 1000;
+
+  // 1) 锚点：R 缓慢跟随，防突然跳变
+  const B = baseHeart(stats);
+  const p90 = (recent && recent.p90 != null) ? recent.p90 : B + P.minGap;
+  const rTarget = Math.min(B + P.maxGap, Math.max(B + P.minGap, p90 - P.p90Offset));
+  if (!algo.anchors) {
+    algo.anchors = { B, R: rTarget };
+  } else {
+    algo.anchors.B = B;
+    algo.anchors.R += (rTarget - algo.anchors.R) * (1 - Math.exp(-dt / P.anchorTau));
+  }
+
+  // 2) 强度 + Attack / Release（上色快、褪色慢）
+  const live = (bpm != null) && !offline;
+  const pTarget = live ? intensityOf(bpm, algo.anchors) : 0;
+  const tau = pTarget > algo.pSmooth ? P.attack : P.release;
+  algo.pSmooth += (pTarget - algo.pSmooth) * (1 - Math.exp(-dt / Math.max(0.05, tau)));
+
+  // 3) 满红迟滞（Schmitt）
+  const R = algo.anchors.R;
+  if (live && bpm >= R) {
+    if (algo.redSince == null) algo.redSince = now;
+    if (now - algo.redSince >= P.redHold) algo.fullyRed = true;
+  } else if (!live || bpm < R - P.redDrop) {
+    algo.redSince = null;
+    algo.fullyRed = false;
+  }
+
+  // 4) 突发特效（与颜色通道独立）+ 冷却
+  if (live) {
+    algo.track.push([now, bpm]);
+    while (algo.track.length && now - algo.track[0][0] > P.burstWindow) algo.track.shift();
+    const rise = bpm - algo.track[0][1];
+    if (rise >= P.burstRise && bpm >= B + P.burstAbove
+        && now - algo.lastBurstAt >= P.burstCooldown) {
+      algo.burst = 1.0;
+      algo.lastBurstAt = now;
+    }
+  } else {
+    algo.track.length = 0;
+  }
+  algo.burst = Math.max(0, algo.burst - dt * 1.1);   // 约 0.9 秒衰减完
+
+  return algo;
+}
+
+/* ---------- 心率线：横穿画面中央 ---------- */
+
+function drawTrace(samples, centerY, amp) {
+  if (!samples || samples.length < 2) return;
+
+  // 3 点移动平均压掉毛刺，然后让曲线把整个高度用满（不再留 10bpm 的死区）
+  const vals = samples.map(s => s[1]);
+  const smooth = vals.map((v, i) => {
+    const a = vals[Math.max(0, i - 1)], b = vals[Math.min(vals.length - 1, i + 1)];
+    return (a + v + b) / 3;
+  });
+  const lo0 = Math.min(...smooth), hi0 = Math.max(...smooth);
+  const mid = (lo0 + hi0) / 2;
+  const span = Math.max(3, hi0 - lo0);       // 只有几乎完全平直时才兜底
+  const lo = mid - span / 2, hi = mid + span / 2;
+
+  const total = samples[samples.length - 1][0] || 1;
+  const windowSec = 90;
+  const t0 = Math.max(0, total - windowSec);
+  const cyc = Math.max(15, (total - t0) || windowSec);
+  const x0 = 1, x1 = W - 1;          // 整条横穿（包含鱼身位置）
+
+  const yOf = v => centerY - ((v - (lo + hi) / 2) / (span / 2)) * amp;
+
+  const pts = [];
+  samples.forEach(([t], i) => {
+    if (t < t0) return;                     // forEach 里要用 return，不能用 continue
+    pts.push([x0 + ((t - t0) / cyc) * (x1 - x0), yOf(smooth[i])]);
+  });
+  if (pts.length < 2) return;
+
+  // 外侧暗描边 + 主红线（半透明：盖过鱼身也不挡视野）
+  ctx.lineJoin = 'miter';
+  ctx.lineCap = 'butt';
+  ctx.globalAlpha = 0.50;
+  ctx.strokeStyle = PAL.traceDim;
+  ctx.lineWidth = Math.max(3, Math.round(H * 0.055));
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (const [x, y] of pts.slice(1)) ctx.lineTo(x, y);
+  ctx.stroke();
+
+  ctx.globalAlpha = 0.88;
+  ctx.strokeStyle = PAL.trace;
+  ctx.lineWidth = Math.max(2, Math.round(H * 0.036));
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (const [x, y] of pts.slice(1)) ctx.lineTo(x, y);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  // 最右端的心跳亮点
+  const [lx, ly] = pts[pts.length - 1];
+  const dot = Math.max(2, Math.round(H * 0.028));
+  px(lx - dot, ly - dot, dot * 2, dot * 2, '#ffffff');
+}
+
+/* ---------- 像素咸鱼 ---------- */
+
+/* =========================================================
+   皮肤系统
+   每套皮肤 = 一个像素网格（行字符串）+ 一个绘制函数。
+   字符约定：. 透明 · # 身体 · E 眼睛 · T 舌头
+   ========================================================= */
+
+const SKIN_DEFS = {
+  fish:  { w: 18, h: 13 },
+  ghost: { w: 14, h: 14 },
+};
+
+/* ---------- 幽灵：白色圆顶 + 黑描边 + 红舌头 + 三瓣波浪底 ---------- */
+const GHOST_ROWS = [
+  '.....####.....',
+  '...########...',
+  '..##########..',
+  '.############.',
+  '##############',
+  '##EE######EE##',
+  '##############',
+  '######TT######',
+  '######TT######',
+  '######TT######',
+  '##############',
+  '##############',
+  '####..##..####',
+  '####..##..####',
+];
+
+function pixelShape(ox, oy, unit, rows, colors) {
+  const h = rows.length, w = rows[0].length;
+  // 1) 填充（宽高各 +1：消除相邻像素块之间的抗锯齿缝隙）
+  for (let r = 0; r < h; r++) {
+    for (let c = 0; c < w; c++) {
+      const ch = rows[r][c];
+      if (ch === '.') continue;
+      px(ox + c * unit, oy + r * unit, unit + 1, unit + 1, colors[ch] || colors['#']);
+    }
+  }
+  // 2) 只在外侧描边（邻居透明才画），这样自动得到干净的轮廓
+  const t = Math.max(1, Math.round(unit * 0.26));
+  for (let r = 0; r < h; r++) {
+    for (let c = 0; c < w; c++) {
+      if (rows[r][c] === '.') continue;
+      const up = r > 0 ? rows[r - 1][c] : '.';
+      const dn = r < h - 1 ? rows[r + 1][c] : '.';
+      const lf = c > 0 ? rows[r][c - 1] : '.';
+      const rt = c < w - 1 ? rows[r][c + 1] : '.';
+      const X = ox + c * unit, Y = oy + r * unit;
+      if (up === '.') px(X, Y, unit, t, colors.line);
+      if (dn === '.') px(X, Y + unit - t, unit, t, colors.line);
+      if (lf === '.') px(X, Y, t, unit, colors.line);
+      if (rt === '.') px(X + unit - t, Y, t, unit, colors.line);
+    }
+  }
+}
+
+function drawGhost(ox, oy, unit, opts) {
+  const { beat, sleeping, flush = 0, burst = 0 } = opts;
+  // 和鱼共用同一套情绪：冷静偏冷白，激动转暖红
+  const body = sleeping ? '#aeb4c0' : mixColor('#f4f6fa', '#ff9b8a', flush);
+  const eye = sleeping ? '#7c8492' : '#1a1d24';
+  const tongue = sleeping ? '#7c8492' : '#ff3b30';
+
+  // 幽灵是飘着的：平时缓慢上下浮动，爆发时蹿得更明显
+  const float = Math.sin(beat * Math.PI * 2) * unit * (0.30 + burst * 0.75);
+
+  pixelShape(ox, oy + float, unit, GHOST_ROWS, {
+    '#': body, 'E': eye, 'T': tongue, line: '#2b2f36',
+  });
+}
+
+/* 按当前皮肤分发 */
+function drawCharacter(x, y, unit, opts) {
+  if (P.skin === 'ghost') return drawGhost(x, y, unit, opts);
+  return drawFish(x, y, unit, opts);
+}
+
+const FISH_W = 18, FISH_H = 13;
+const CGX = 7.2, CGY = 6.4, RX = 6.6, RY = 4.6;
+
+function drawFish(ox, oy, unit, opts) {
+  const { zone, beat, sleeping, bpm, flush = 0, burst = 0 } = opts;
+  const bodyColor = mixColor(PAL.body, '#ff9b8a', flush);
+  const shadeColor = mixColor(PAL.shade, '#d4553f', flush);
+  const lineColor = PAL.line;
+
+  const vigor = 0.75 + flush * 0.5 + burst * 0.7;   // 心率越高 / 爆发时，突刺越有劲
+  const thrust = sleeping ? 0 : (Math.max(0, Math.sin(beat * Math.PI * 2)) ** 3) * vigor;
+  const jitter = zone === 'danger' ? (Math.sin(performance.now() / 40) * unit * 0.3) : 0;
+  const sx = ox + thrust * unit * 1.2 + jitter;
+  const sy = oy + thrust * unit * 0.25;
+  const g = (gx, gy) => [sx + gx * unit, sy + gy * unit];
+  const inside = (a, b) => {
+    const nx = (a - CGX) / RX, ny = (b - CGY) / RY;
+    return nx * nx + ny * ny <= 1.0;
+  };
+
+  // ---- 小矛（先画，鱼身会盖住中段）----
+  const hotSpear = !sleeping && (zone === 'warn' || zone === 'danger');
+  const SP_BX = 0.5, SP_BY = 14.5, SP_N = 24, SP_DX = 0.55, SP_DY = -0.55;
+  for (let i = 0; i < SP_N; i++) {
+    const [x, y] = g(SP_BX + i * SP_DX, SP_BY + i * SP_DY);
+    px(x, y, unit, unit, '#7a4a1e');
+    px(x, y + unit * 0.72, unit, unit * 0.28, '#4d2d10');
+  }
+  const hx = SP_BX + SP_N * SP_DX, hy = SP_BY + SP_N * SP_DY;
+  { const [x, y] = g(hx - 0.62, hy + 0.30); px(x, y, unit * 0.9, unit * 0.9, '#aeb8c2'); }
+  { const [x, y] = g(hx + 0.30, hy - 1.18); px(x, y, unit * 0.9, unit * 0.9, '#aeb8c2'); }
+  const HEAD = [[0.00, 0.00, 1.00, '#cfd8e2'], [0.60, -0.60, 1.00, '#e4ebf3'],
+                [1.20, -1.20, 0.85, '#f6faff'], [1.80, -1.80, 0.60, hotSpear ? '#ffe9a8' : '#ffffff']];
+  for (const [dx, dy, sc, col] of HEAD) {
+    const [x, y] = g(hx + dx, hy + dy);
+    px(x, y, unit * sc, unit * sc, col);
+  }
+  // 令旗
+  const fWave = Math.sin(beat * Math.PI * 2) * 0.18;
+  const FLAG = hotSpear ? '#ff5a5a' : '#d43232';
+  { const [x, y] = g(hx + 0.55, hy - 1.95 + fWave); px(x, y, unit * 1.6, unit * 1.5, FLAG); }
+  { const [x, y] = g(hx + 1.75, hy - 1.72 + fWave); px(x, y, unit * 1.5, unit * 1.4, FLAG); }
+  { const [x, y] = g(hx + 2.90, hy - 1.50 + fWave); px(x, y, unit * 1.2, unit * 1.1, '#8e1f1f'); }
+
+  // ---- 鱼身 ----
+  for (let gy = 0; gy < FISH_H; gy++) {
+    for (let gx = 0; gx < FISH_W; gx++) {
+      const d = ((gx - CGX) / RX) ** 2 + ((gy - CGY) / RY) ** 2;
+      if (d > 1.0) continue;
+      const [x, y] = g(gx, gy);
+      let col = bodyColor;
+      if (d > 0.72) col = shadeColor;
+      else if (gy <= CGY - 2 && gx < CGX + 2) col = PAL.bodyHi;
+      px(x, y, unit, unit, col);
+    }
+  }
+  for (let gy = 0; gy < FISH_H; gy++) {
+    for (let gx = 0; gx < FISH_W; gx++) {
+      if (inside(gx, gy)) continue;
+      if (inside(gx - 1, gy) || inside(gx + 1, gy) || inside(gx, gy - 1) || inside(gx, gy + 1)) {
+        const [x, y] = g(gx, gy);
+        px(x, y, unit, unit, lineColor);
+      }
+    }
+  }
+  // 尾 / 鳍
+  for (const [gx, top, hgt] of [[13.4, 5, 3], [14.4, 4, 5], [15.4, 3, 7], [16.4, 2, 9]]) {
+    for (let i = 0; i < hgt; i++) {
+      const [x, y] = g(gx, top + i);
+      px(x, y, unit, unit, (i === 0 || i === hgt - 1) ? lineColor : PAL.fin);
+    }
+  }
+  for (let i = 0; i < 3; i++) {
+    const [x, y] = g(6 + i, 2 - i * 0.4);
+    px(x, y, unit, unit, i === 2 ? lineColor : PAL.fin);
+  }
+  // 眼睛 / 嘴 / 腮
+  const [ex, ey] = g(3, 5);
+  if (sleeping) {
+    px(ex, ey + unit * 0.5, unit * 2, unit * 0.5, lineColor);
+  } else {
+    px(ex, ey, unit * 2, unit * 2, zone === 'danger' ? '#7a1414' : lineColor);
+  }
+  { const [x, y] = g(0.2, 6.6); px(x, y, unit, unit, lineColor); }
+  for (let i = 0; i < 3; i++) {
+    const [x, y] = g(5, 4.6 + i);
+    px(x, y, unit * 0.7, unit * 0.7, shadeColor);
+  }
+  // 出汗（数量随心率连续增加）
+  const nSweat = flush >= 0.9 ? 3 : flush >= 0.6 ? 2 : flush >= 0.3 ? 1 : 0;
+  if (nSweat > 0) {
+    for (let i = 0; i < nSweat; i++) {
+      const ph = (beat + i / 3) % 1;
+      px(sx + 4 * unit - unit * (0.6 + i * 0.7) - ph * unit * 1.5,
+         sy + 1.5 * unit - ph * unit * (2.2 + i * 0.5),
+         unit * (0.7 - i * 0.12), unit * (0.7 - i * 0.12), '#bfe9ff');
+    }
+  }
+  // 睡觉的 Zzz
+  if (sleeping) {
+    const t = performance.now() / 1000;
+    for (let i = 0; i < 3; i++) {
+      const ph = (t * 0.5 + i * 0.33) % 1;
+      const size = unit * (0.6 + i * 0.18);
+      px(sx + (10 + i * 2.2) * unit, sy - ph * 3 * unit, size, size * 0.35, '#9fb3c8');
+      px(sx + (10 + i * 2.2) * unit, sy - ph * 3 * unit, size * 0.35, size, '#9fb3c8');
+    }
+  }
+}
+
+/* ---------- 像素数字（带深色描边，保证亮背景上也看得清） ---------- */
+
+function pixelText(x, y, text, dot, color, outline) {
+  let cx = x;
+  for (const ch of String(text)) {
+    const glyph = FONT[ch] || FONT[' '];
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 3; c++) {
+        if (glyph[r][c] !== '1') continue;
+        const bx = cx + c * dot, by = y + r * dot;
+        if (outline) px(bx + dot * 0.34, by + dot * 0.34, dot, dot, outline);  // 投影，不糊
+        px(bx, by, dot, dot, color);
+      }
+    }
+    cx += 4 * dot;
+  }
+  return cx - dot;
+}
+
+function pixelTextWidth(text, dot) { return String(text).length * 4 * dot; }
+
+/* ---------- 状态 ---------- */
+
+let state = {
+  bpm: null, connected: false, zone: 'idle',
+  stats: {}, battery: null, warn: 120, danger: 150,
+};
+let history = { samples: [], warn: 120, danger: 150 };
+let phase = 0, lastT = performance.now();
+
+const DEMO = params.get('demo') === '1';
+
+if (DEMO) {
+  const FIXED = parseFloat(params.get('bpm') || 'NaN');   // ?demo=1&bpm=165 可锁定心率看配色
+  let demoBpm = isNaN(FIXED) ? 88 : FIXED, demoT = 0;
+  let demoMax = demoBpm, demoMin = demoBpm, demoSum = 0, demoN = 0;
+  setInterval(() => {
+    if (isNaN(FIXED)) {
+      demoBpm += (Math.random() - 0.5) * 6;
+    } else {
+      demoBpm = FIXED + (Math.random() - 0.5) * 5;
+    }
+    demoBpm = Math.max(55, Math.min(190, demoBpm));
+    demoT += 0.7; demoN++; demoSum += demoBpm;
+    demoMax = Math.max(demoMax, demoBpm);
+    demoMin = Math.min(demoMin, demoBpm);
+    history.samples.push([demoT, Math.round(demoBpm)]);
+    if (history.samples.length > 400) history.samples.shift();
+    state.bpm = Math.round(demoBpm);
+    state.connected = true;
+    state.stats = { min: Math.round(demoMin), max: Math.round(demoMax),
+                    avg: Math.round(demoSum / demoN), samples: demoN };
+    state.recent = { min: Math.round(demoMin), max: Math.round(demoMax),
+                     avg: Math.round(demoSum / demoN), samples: demoN, window: 600 };
+    state.zone = demoBpm >= 150 ? 'danger' : demoBpm >= 120 ? 'warn' : 'rest';
+  }, 700);
+} else {
+  const es = new EventSource('/events');
+  es.onmessage = e => { try { state = JSON.parse(e.data); } catch (_) {} };
+  es.onerror = () => { state.connected = false; };
+  async function pollHistory() {
+    try { history = await (await fetch('/history')).json(); } catch (_) {}
+  }
+  setInterval(pollHistory, 1000);
+  pollHistory();
+}
+
+/* ---------- 主循环 ---------- */
+
+function frame(now) {
+  const dt = Math.min(0.1, (now - lastT) / 1000);
+  lastT = now;
+
+  const bpm = state.bpm;
+  const age = state.age;
+  const offline = !state.connected || (age != null && age > P.offlineAfter);
+  if (state.base != null) lockedBase = state.base;   // 服务端锁定后基准不再漂移
+  // 皮肤实时跟随服务端（在控制台/调参面板切换后，这里立刻就变，不用刷新）
+  if (state.skin && state.skin !== P.skin && !params.get('skin')) P.skin = state.skin;
+  const a = updateAlgo(bpm, state.stats, state.recent, dt, offline);
+  const live = (bpm != null) && !offline;
+
+  if (live) phase = (phase + (bpm / 60) * dt) % 1;
+  else phase = (phase + 0.18 * dt) % 1;
+
+  ctx.clearRect(0, 0, W, H);
+  if (PREVIEW_BG) { ctx.fillStyle = '#1b1f27'; ctx.fillRect(0, 0, W, H); }
+
+  const zone = live ? (state.zone || 'idle') : 'idle';
+  const pad = Math.round(8 * SCALE);
+
+  const centerY = H * 0.5;
+
+  // 1) 红色心率线（最底层，整条横穿；半透明）
+  drawTrace(history.samples, centerY, H * 0.44);
+
+  // 2) 角色（鱼 / 幽灵，按皮肤切换；盖在线的上层）
+  const skin = SKIN_DEFS[P.skin] || SKIN_DEFS.fish;
+  const unitFish = Math.max(2, Math.round(H * 0.030));
+  const fishW = skin.w * unitFish;
+  const fishX = pad + Math.round(4 * SCALE);
+  const fishY = centerY - (skin.h * unitFish) / 2 + unitFish * 0.5;
+  drawCharacter(fishX, fishY, unitFish, {
+    zone, beat: phase, sleeping: !live, bpm, flush: a.pSmooth, burst: a.burst,
+  });
+
+  // 3) 数字（压在线上；离线显示 ---）
+  const dot = Math.max(3, Math.round(H / 16));
+  const text = live ? String(Math.round(bpm)).padStart(3, '0') : '---';
+  let color = live ? colorOfIntensity(a.pSmooth) : PAL.dim;
+  if (a.fullyRed) color = mixColor(color, '#c1130c', 0.55);               // 满红：压深
+  if (a.burst > 0.05) color = mixColor(color, '#ffffff', a.burst * 0.55); // 爆发瞬间提亮
+  const textW = pixelTextWidth(text, dot);
+  const tx = Math.max(fishX + fishW + pad, W - pad * 2 - textW);
+  const ty = centerY - (5 * dot) / 2;
+  pixelText(tx, ty, text, dot, color, 'rgba(0,0,0,0.55)');
+
+  // 心跳时数字上浮一像素（柔和的动感）
+  if (live && Math.abs(Math.sin(phase * Math.PI * 2)) > 0.8) {
+    pixelText(tx, ty - 1, text, dot, color, 'rgba(0,0,0,0.55)');
+  }
+
+  // 4) 连接状态点（右上角，很小）
+  const d = Math.max(2, Math.round(H * 0.03));
+  px(W - pad - d * 2, pad, d * 2, d * 2,
+     live ? PAL.cool : (offline ? '#c0392b' : PAL.hot));
+
+  requestAnimationFrame(frame);
+}
+
+fitCanvas();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

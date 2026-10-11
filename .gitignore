@@ -1,0 +1,36 @@
+# ---- 个人数据：绝不上传 ----
+logs/
+*.csv
+params.json
+hud.json
+devices.json
+
+# ---- 本地素材 / 调试产物 ----
+_preview/
+_debug/
+_archive/
+app/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---- 临时文件 ----
+*.log
+*.tmp
+*~

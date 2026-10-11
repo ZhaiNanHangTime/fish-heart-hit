@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>参数调校 · 咸鱼突刺</title>
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .bar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 11px 22px; box-shadow: inset 0 -1px 0 var(--edge-soft);
+  }
+  .bar h1 { margin: 0; font: 600 13px/1 var(--ui); letter-spacing: .12em; }
+  .bar h1 b { color: var(--tangerine); }
+  .bar .spacer { flex: 1; }
+  .bar .saved { color: var(--jade); font-size: 12px; }
+
+  main { padding: 18px 22px 40px; max-width: 1180px; margin: 0 auto; }
+
+  /* ---------- 示波区（可拖把手） ---------- */
+  .scope {
+    position: relative; height: 420px;
+    box-shadow: inset 0 0 0 1px var(--edge-soft);
+    touch-action: none; user-select: none;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  .handle {
+    position: absolute; left: 0; right: 0; height: 0;
+    display: flex; align-items: center; gap: 9px;
+    padding-left: 14px; cursor: ns-resize;
+  }
+  .handle::before {                      /* 贯穿全宽的拖拽线 */
+    content: ""; position: absolute; left: 0; right: 0; top: -1px; height: 2px;
+    background: currentColor; opacity: .85;
+  }
+  .handle .grip {                        /* 左侧握把 */
+    position: relative; z-index: 2;
+    font: 11px/1 var(--num); letter-spacing: .1em;
+    padding: 5px 10px; background: var(--ink-2);
+    box-shadow: inset 0 0 0 1px currentColor;
+    color: inherit; white-space: nowrap;
+  }
+  .handle .grip i { font-style: normal; opacity: .65; margin-left: 6px; }
+  .handle:hover .grip { background: var(--ink-3); }
+
+  .handle.y { color: var(--gold); }
+  .handle.o { color: var(--tangerine); }
+  .handle.r { color: var(--ember); }
+
+  .scopebar {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    margin-top: 14px; font: 11px/1.9 var(--num); color: var(--ash);
+  }
+  .scopebar b { color: var(--bone); }
+  .scopebar .hint { font-family: var(--ui); }
+
+  /* ---------- 其余参数 ---------- */
+  .groups { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
+  .row {
+    display: grid; grid-template-columns: 116px 1fr 48px; gap: 10px; align-items: center;
+    padding: 8px 0; border-bottom: 1px solid var(--edge-soft);
+  }
+  .row:last-of-type { border-bottom: 0; }
+  .row .name { font-family: var(--num); font-size: 12px; }
+  .row .val { font-family: var(--num); font-size: 14px; text-align: right; color: var(--tangerine); }
+  .row .desc { grid-column: 1 / -1; color: var(--ash); font-size: 11px; margin: -2px 0 0; }
+
+  @media (max-width: 880px) { .groups { grid-template-columns: 1fr; } .scope { height: 320px; } }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <h1><b>🐟</b> 参数调校</h1>
+  <span class="hint">拖波形上的黄 / 橙 / 红三条线，就是直接改色带位置</span>
+  <span class="spacer"></span>
+  <label class="hint" style="display:flex;align-items:center;gap:6px;white-space:nowrap">
+    皮肤
+    <select id="skinSel" onchange="setSkin()"
+            style="background:var(--ink-3);color:var(--bone);border:0;padding:6px 9px;
+                   font:12px var(--ui);box-shadow:inset 0 0 0 1px var(--edge)">
+      <option value="fish">咸鱼</option>
+      <option value="ghost">幽灵</option>
+    </select>
+  </label>
+  <span class="saved" id="saveTip"></span>
+  <label class="hint" style="display:flex;align-items:center;gap:7px;cursor:pointer;white-space:nowrap">
+    <input type="checkbox" id="live" checked onchange="refresh()"> 用真实心率
+  </label>
+  <button class="btn jade" onclick="saveParams()">保存到服务端</button>
+  <button class="btn ghost" onclick="resetAll()">恢复默认</button>
+  <button class="btn ghost" onclick="copyParams()">复制参数</button>
+</div>
+
+<main>
+  <section class="scope cut" id="scope">
+    <canvas id="wave"></canvas>
+    <div class="handle y" id="hY" data-k="yellowAt"><span class="grip">黄 <i id="gY">--</i></span></div>
+    <div class="handle o" id="hO" data-k="orangeAt"><span class="grip">橙 <i id="gO">--</i></span></div>
+    <div class="handle r" id="hR" data-k="minGap"><span class="grip">满红 <i id="gR">--</i></span></div>
+  </section>
+
+  <div class="scopebar">
+    <span>基准 B <b id="sB">--</b></span>
+    <span>P90 <b id="sP">--</b></span>
+    <span>当前 <b id="sC">--</b> bpm</span>
+    <span class="hint" id="sHint">拖动三条线调整色带；松手即时生效</span>
+  </div>
+
+  <div class="groups">
+    <section class="panel cut">
+      <h2 class="panel-title">阈值细节</h2>
+      <div id="g1"></div>
+    </section>
+    <section class="panel cut">
+      <h2 class="panel-title">视觉缓动</h2>
+      <div id="g2"></div>
+    </section>
+    <section class="panel cut" style="grid-column:1/-1">
+      <h2 class="panel-title">突发特效 · 节目效果（与颜色无关）</h2>
+      <div id="g3"></div>
+    </section>
+  </div>
+
+  <p class="hint" style="margin-top:18px">
+    改完点「保存到服务端」→ 网页和悬浮窗下次启动自动读取。
+    「复制参数」拿到的 <b>?minGap=22&amp;...</b> 贴到浏览器源地址后面也可以（URL 优先级最高）。
+  </p>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const cv = $('wave'), ctx = cv.getContext('2d');
+
+const DEFAULTS = {
+  minGap: 22, maxGap: 30, p90Offset: 3, yellowAt: 0.4, orangeAt: 0.7, anchorTau: 15,
+  attack: 2, release: 6, redHold: 2, redDrop: 5, offlineAfter: 5,
+  burstRise: 10, burstAbove: 15, burstWindow: 30, burstCooldown: 30,
+};
+let cur = Object.assign({}, DEFAULTS);
+let hr = {}, hist = [], dragKey = null;
+
+const GROUPS = [
+  ['g1', [
+    ['maxGap',    '阈值上限余量',   25, 60, 1, 'R 最多比基准高多少（防抗红）'],
+    ['p90Offset', 'P90 偏移',       0, 15, 1, 'R = P90 − 该值'],
+    ['anchorTau', '阈值跟随(秒)',   3, 60, 1, '调大更稳，调小更跟手'],
+  ]],
+  ['g2', [
+    ['attack',       '上色时间(秒)',   0.3, 6, 0.1, '调小 → 红得快'],
+    ['release',      '褪色时间(秒)',   1, 20, 0.5, '调大 → 褪得慢，不会一闪一闪'],
+    ['redHold',      '满红迟滞(秒)',   0, 6, 0.5, '连续达阈值多久才算满红'],
+    ['redDrop',      '解除回落(bpm)',  0, 20, 1, '回落多少解除满红'],
+    ['offlineAfter', '离线判定(秒)',   2, 30, 1, '超过这么久没数据就显示 ---'],
+  ]],
+  ['g3', [
+    ['burstRise',     '触发涨幅(bpm)', 3, 25, 1, '窗口内涨这么多就爆发'],
+    ['burstAbove',    '须高于基准',    0, 40, 1, '防平静期乱触发'],
+    ['burstWindow',   '观察窗口(秒)',  5, 120, 5, '调短更敏感'],
+    ['burstCooldown', '冷却(秒)',      0, 180, 5, '防频繁闪烁'],
+  ]],
+];
+
+function renderGroups() {
+  for (const [id, items] of GROUPS) {
+    $(id).innerHTML = items.map(([k, label, lo, hi, step, hint]) => `
+      <div class="row">
+        <label class="name" for="s_${k}">${k}</label>
+        <input type="range" id="s_${k}" min="${lo}" max="${hi}" step="${step}"
+               value="${cur[k]}" oninput="setVal('${k}', this.value)">
+        <span class="val" id="v_${k}">${cur[k]}</span>
+        <p class="desc">${label} · ${hint}</p>
+      </div>`).join('');
+  }
+}
+
+function setVal(k, v) {
+  cur[k] = parseFloat(v);
+  $('v_' + k).textContent = cur[k];
+  push();
+}
+
+function anchors() {
+  const s = hr.stats || {}, rc = hr.recent || {};
+  let B = hr.base;
+  if (B == null && (s.samples || 0) >= 40 && s.min != null && s.avg != null) {
+    B = Math.max(45, s.min + (s.avg - s.min) * 0.25);
+  }
+  if (B == null) B = 70;
+  const p90 = rc.p90 != null ? rc.p90 : B + cur.minGap;
+  const R = Math.min(B + cur.maxGap, Math.max(B + cur.minGap, p90 - cur.p90Offset));
+  return { B, R, Y: B + (R - B) * cur.yellowAt, O: B + (R - B) * cur.orangeAt, p90 };
+}
+
+/* ---------- 画布 ---------- */
+let yMap = { lo: 60, hi: 100, H: 1, yOf: (v) => 0, vOf: (y) => 0 };
+
+function draw() {
+  const dpr = devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (!W || !H) return;
+  cv.width = W * dpr; cv.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  const A = anchors();
+  const vals = hist.map((d) => d[1]);
+  const lo = Math.min(...(vals.length ? vals : [A.B]), A.B) - 4;
+  const hi = Math.max(...(vals.length ? vals : [A.R]), A.R) + 5;
+  const span = Math.max(14, hi - lo);
+  const yOf = (v) => H - ((v - lo) / span) * H;
+  yMap = { lo, hi, H, yOf, vOf: (y) => lo + (1 - y / H) * span };
+
+  // 四段强度色带
+  const bands = [
+    [lo, A.B, 'rgba(232,230,223,.02)'],
+    [A.B, A.Y, 'rgba(255,209,102,.05)'],
+    [A.Y, A.O, 'rgba(255,138,92,.07)'],
+    [A.O, A.R, 'rgba(255,59,48,.10)'],
+    [A.R, hi, 'rgba(255,59,48,.18)'],
+  ];
+  for (const [a, b, col] of bands) {
+    const y0 = yOf(b), y1 = yOf(a);
+    ctx.fillStyle = col;
+    ctx.fillRect(0, Math.min(y0, y1), W, Math.abs(y1 - y0));
+  }
+
+  // 网格
+  ctx.strokeStyle = 'rgba(255,255,255,.03)';
+  for (let i = 1; i < 8; i++) {
+    const x = (W / 8) * i;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+
+  // 波形
+  if (hist.length > 1) {
+    const t0 = hist[0][0], t1 = hist[hist.length - 1][0];
+    const cyc = Math.max(1, t1 - t0);
+    ctx.beginPath();
+    hist.forEach(([t, v], i) => {
+      const x = ((t - t0) / cyc) * W, y = yOf(v);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
+    ctx.strokeStyle = 'rgba(255,59,48,.9)';
+    ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,59,48,.16)';
+    ctx.lineWidth = 7; ctx.stroke();
+  }
+
+  // 刻度值
+  ctx.font = '10px "Cascadia Mono", Consolas, monospace';
+  ctx.fillStyle = 'rgba(232,230,223,.45)';
+  ctx.fillText(String(Math.round(A.B)), W - 34, yOf(A.B) - 6);
+  ctx.fillStyle = 'rgba(255,90,60,.8)';
+  ctx.fillText(String(Math.round(A.R)), W - 34, yOf(A.R) - 6);
+
+  // 把手位置 + 数值
+  const place = (el, v, txt) => {
+    el.style.top = yOf(v) + 'px';
+    $('g' + txt).textContent = Math.round(v);
+  };
+  place($('hY'), A.Y, 'Y');
+  place($('hO'), A.O, 'O');
+  place($('hR'), A.R, 'R');
+
+  // 状态条
+  $('sB').textContent = A.B.toFixed(0);
+  $('sP').textContent = A.p90 != null ? A.p90 : '--';
+  $('sC').textContent = hr.bpm != null ? hr.bpm : '--';
+}
+
+/* ---------- 拖拽 ---------- */
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+function beginDrag(e) {
+  const h = e.target.closest('.handle');
+  if (!h) return;
+  dragKey = h.dataset.k;
+  h.setPointerCapture?.(e.pointerId);
+  e.preventDefault();
+}
+
+function moveDrag(e) {
+  if (!dragKey) return;
+  const rect = $('scope').getBoundingClientRect();
+  const bpm = yMap.vOf(clamp(e.clientY - rect.top, 0, rect.height));
+  const A = anchors();
+
+  if (dragKey === 'minGap') {
+    cur.minGap = Math.round(clamp(bpm - A.B, 10, 40));
+  } else if (dragKey === 'yellowAt') {
+    const f = (bpm - A.B) / Math.max(1, A.R - A.B);
+    cur.yellowAt = Math.round(clamp(f, 0.08, cur.orangeAt - 0.08) * 100) / 100;
+  } else if (dragKey === 'orangeAt') {
+    const f = (bpm - A.B) / Math.max(1, A.R - A.B);
+    cur.orangeAt = Math.round(clamp(f, cur.yellowAt + 0.08, 0.96) * 100) / 100;
+  }
+  // 同步到滑杆（如果有对应的）
+  const sl = $('s_' + dragKey);
+  if (sl) { sl.value = cur[dragKey]; $('v_' + dragKey).textContent = cur[dragKey]; }
+  push(); draw();
+}
+
+function endDrag() { dragKey = null; }
+
+$('scope').addEventListener('pointerdown', beginDrag);
+addEventListener('pointermove', moveDrag);
+addEventListener('pointerup', endDrag);
+addEventListener('pointercancel', endDrag);
+
+/* ---------- 数据 & 同步 ---------- */
+function push() {
+  // 预览页（/）通过 postMessage 接收；保存时走 /params
+  if (window.__preview && window.__preview.contentWindow) {
+    window.__preview.contentWindow.postMessage({ type: 'params', params: cur }, '*');
+  }
+}
+
+async function refresh() {
+  try {
+    const [h, hs] = await Promise.all([
+      (await fetch('/hr')).json(),
+      (await fetch('/history')).json(),
+    ]);
+    hr = h;
+    hist = (hs.samples || []).map((d) => [d[0], d[1]]);
+    if (!hist.length || !$('live').checked) hist = simulate();
+  } catch (_) {
+    hist = simulate();
+  }
+  draw();
+}
+
+// 没有真实数据时造一段像样的模拟波形，至少让把手能调
+function simulate() {
+  const out = [];
+  let v = (hr.base || 70) + 4;
+  for (let i = 0; i < 160; i++) {
+    v += (Math.random() - 0.48) * 3.2;
+    v = Math.max(52, Math.min(150, v));
+    out.push([i * 0.9, Math.round(v)]);
+  }
+  return out;
+}
+
+async function saveParams() {
+  try {
+    const saved = await (await fetch('/params', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cur),
+    })).json();
+    $('saveTip').textContent = '已保存 ✓';
+    setTimeout(() => { $('saveTip').textContent = ''; }, 3500);
+    Object.keys(saved || {}).forEach((k) => { if (k in cur) cur[k] = saved[k]; });
+  } catch (e) { alert('保存失败：' + e); }
+}
+
+function resetAll() { cur = Object.assign({}, DEFAULTS); renderGroups(); push(); draw(); }
+
+function copyParams() {
+  const q = Object.keys(cur).map((k) => `${k}=${cur[k]}`).join('&');
+  navigator.clipboard.writeText('?' + q).then(
+    () => alert('已复制，贴到浏览器源地址后面即可：\n\n?' + q),
+    () => prompt('手动复制：', '?' + q));
+}
+
+async function loadParams() {
+  try {
+    const p = await (await fetch('/params')).json();
+    Object.keys(p || {}).forEach((k) => { if (k in cur) cur[k] = p[k]; });
+  } catch (_) {}
+}
+
+addEventListener('resize', draw);
+async function setSkin() {
+  const v = $('skinSel').value;
+  try {
+    await fetch('/params', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skin: v }),
+    });
+    $('saveTip').textContent = '皮肤已保存 ✓ 刷新直播页生效';
+    setTimeout(() => { $('saveTip').textContent = ''; }, 3000);
+  } catch (e) { alert('保存失败：' + e); }
+}
+
+async function loadSkin() {
+  try {
+    const p = await (await fetch('/params')).json();
+    $('skinSel').value = p.skin || 'fish';
+  } catch (_) {}
+}
+
+loadParams().then(() => { renderGroups(); loadSkin(); refresh(); });
+setInterval(refresh, 1500);
+</script>
+</body>
+</html>
