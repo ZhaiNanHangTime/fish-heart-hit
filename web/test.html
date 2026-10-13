@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>fish-heart-hit · 心率动画验收台</title>
+<style>
+  :root{
+    --bg:#141821; --card:#1b202b; --edge:#2b3242; --fg:#e8e6df; --dim:#8b93a5;
+    --acc:#ff8a5c; --ok:#3ad6c8; --gold:#ffd166; --red:#ff3b30; --blue:#7ec8ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:13px/1.5 "Microsoft YaHei",system-ui,sans-serif}
+  header{padding:10px 16px;border-bottom:1px solid var(--edge);display:flex;
+         align-items:center;gap:12px;flex-wrap:wrap}
+  h1{font-size:15px;margin:0;font-weight:600}
+  .tag{font-size:11px;color:var(--dim);border:1px solid var(--edge);
+       padding:1px 7px;border-radius:99px}
+  .wrap{display:grid;grid-template-columns:340px 1fr;gap:14px;padding:14px;align-items:start}
+  @media (max-width:1100px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--edge);border-radius:10px;padding:12px;margin-bottom:12px}
+  .card h2{font-size:12px;margin:0 0 9px;color:var(--dim);font-weight:600;letter-spacing:.5px}
+  .stage{position:relative;background:#0d1017;border:1px solid var(--edge);border-radius:10px;
+         padding:10px;overflow:hidden}
+  iframe{display:block;border:0;background:transparent;border-radius:6px}
+  #ovl{width:520px;height:170px;background:#0d1017}
+  .readout{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-top:10px}
+  .ro{background:#0f131b;border:1px solid var(--edge);border-radius:8px;padding:6px 8px}
+  .ro .k{font-size:10px;color:var(--dim)}
+  .ro .v{font:600 15px Consolas,monospace}
+  .state-row{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+  .pill{border:1px solid var(--edge);border-radius:99px;padding:2px 10px;font-size:11px;color:var(--dim)}
+  .pill.on{color:#0d1017;background:var(--ok);border-color:var(--ok);font-weight:700}
+  .pill.warn{background:var(--gold);border-color:var(--gold);color:#0d1017;font-weight:700}
+  .pill.burst{background:var(--red);border-color:var(--red);color:#fff;font-weight:700}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  button{font:inherit;color:var(--fg);background:#232a38;border:1px solid var(--edge);
+         border-radius:8px;padding:7px 10px;cursor:pointer;text-align:left}
+  button:hover{background:#2b3446;border-color:#3a4459}
+  button.pri{background:var(--acc);border-color:var(--acc);color:#1a1208;font-weight:700}
+  button.pri:hover{background:#ff9d75}
+  button.sm{padding:4px 8px;font-size:12px}
+  .scn small{display:block;color:var(--dim);font-size:11px;margin-top:2px}
+  label.row{display:flex;align-items:center;gap:8px;margin:7px 0}
+  input[type=range]{flex:1;accent-color:var(--acc)}
+  input[type=number]{width:74px;background:#0f131b;border:1px solid var(--edge);
+                     color:var(--fg);border-radius:6px;padding:4px 6px;font:inherit}
+  table{width:100%;border-collapse:collapse;font:12px Consolas,monospace}
+  th,td{text-align:left;padding:3px 6px;border-bottom:1px solid #232a38}
+  th{color:var(--dim);font-weight:600}
+  #log{max-height:300px;overflow:auto}
+  .hint{color:var(--dim);font-size:12px}
+  .kbd{border:1px solid var(--edge);border-radius:4px;padding:0 5px;font:12px Consolas,monospace;color:var(--fg)}
+  .marker{font-size:11px;color:var(--dim);display:flex;justify-content:space-between}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .grid3 .cell{background:#0f131b;border:1px solid var(--edge);border-radius:8px;padding:6px}
+  .grid3 .cell b{font-size:11px;color:var(--dim);display:block;margin-bottom:4px;font-weight:600}
+  .grid3 iframe{width:100%;height:150px}
+</style>
+</head>
+<body>
+<header>
+  <h1>心率动画验收台</h1>
+  <span class="tag">精确驱动心率 → 看动画怎么反应</span>
+  <span class="tag" id="thrTag">—</span>
+  <span style="flex:1"></span>
+  <span class="hint">快捷键：<span class="kbd">空格</span> 播放/暂停　<span class="kbd">R</span> 回落基线</span>
+</header>
+
+<div class="wrap">
+  <div>
+    <div class="card">
+      <h2>1 · 场景（点一下就跑）</h2>
+      <div class="grid2" id="scenarios"></div>
+    </div>
+
+    <div class="card">
+      <h2>2 · 手动控制</h2>
+      <label class="row">心率 <input type="range" id="hr" min="45" max="190" step="1" value="65">
+        <input type="number" id="hrNum" min="45" max="190" step="1" value="65"></label>
+      <div class="marker"><span id="mLo">—</span><span id="mHi">—</span></div>
+      <label class="row">锁定基准 B <input type="number" id="base" min="40" max="120" step="1" placeholder="自动">
+        <button class="sm" id="baseAuto">清除</button></label>
+      <label class="row"><input type="checkbox" id="noise"> 叠加 ±1.5 读数抖动</label>
+      <label class="row">倍速
+        <select id="speed" style="background:#0f131b;color:var(--fg);border:1px solid var(--edge);border-radius:6px;padding:4px">
+          <option value="1">1×</option><option value="2" selected>2×</option>
+          <option value="4">4×</option><option value="8">8×</option>
+        </select>
+        <button class="sm" id="pause">暂停</button>
+      </label>
+    </div>
+
+    <div class="card">
+      <h2>3 · 皮肤对比（同一个人，三种画法）</h2>
+      <div class="grid3" id="grid3"></div>
+      <div class="hint" style="margin-top:8px">三格同步接收同一心率，用来对比 fish / ghost / xianyu 的动作差异。</div>
+    </div>
+  </div>
+
+  <div>
+    <div class="stage">
+      <iframe id="ovl" src="/?bg=1&test=1&skin=fish" title="overlay"></iframe>
+      <div class="readout">
+        <div class="ro"><div class="k">心率</div><div class="v" id="vBpm">--</div></div>
+        <div class="ro"><div class="k">强度 flush</div><div class="v" id="vFlush">--</div></div>
+        <div class="ro"><div class="k">特效 burst</div><div class="v" id="vBurst">--</div></div>
+        <div class="ro"><div class="k">满红</div><div class="v" id="vRed">--</div></div>
+        <div class="ro"><div class="k">基准 B / 阈值 R</div><div class="v" id="vBR">--</div></div>
+        <div class="ro"><div class="k">当前帧</div><div class="v" id="vFrame" style="font-size:13px">--</div></div>
+      </div>
+      <div class="state-row">
+        <span class="pill" id="pRest">rest 平静</span>
+        <span class="pill" id="pWarn">warn 警戒</span>
+        <span class="pill" id="pDanger">danger 危险</span>
+        <span class="pill" id="pBurst">burst 爆发</span>
+        <span class="pill" id="pRed">满红</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h2>4 · 时间线（只在"变成另一个状态"时记一行）</h2>
+      <div id="log"><table><thead><tr>
+        <th>时刻</th><th>心率</th><th>flush</th><th>burst</th><th>状态变化</th>
+      </tr></thead><tbody id="logBody"></tbody></table></div>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button class="sm" id="clearLog">清空</button>
+        <button class="sm" id="copyLog">复制为文本</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const iframe = document.getElementById('ovl');
+const frames = [];
+const $ = id => document.getElementById(id);
+
+// ---- 阈值：用 /params 里的真实参数算，保证与页面一致 ----
+let P = { minGap:22, maxGap:30, p90Offset:3, warn:120, danger:150 };
+let TH = { B:65, burstLow:80, red:87, warn:120, danger:150 };
+function recomputeThresholds(){
+  const B = P.base || 65;
+  TH = {
+    B,
+    ping: Math.round(B + (P.minGap||22) * 0.45),
+    burstLow: B + (P.minGap||22),
+    red: B + (P.minGap||22),
+    warn: P.warn || 120,
+    danger: P.danger || 150,
+  };
+  $('thrTag').textContent = `基准 B≈${TH.B}　burst 门槛≈${TH.burstLow}　满红≈${TH.red}　warn ${TH.warn} / danger ${TH.danger}`;
+  $('mLo').textContent = `B ${B}`;
+  $('mHi').textContent = `满红 ${TH.red}`;
+}
+fetch('/params').then(r => r.json()).then(v => { P = Object.assign(P, v); recomputeThresholds(); }).catch(()=>recomputeThresholds());
+
+// ---- 场景：每项 = {name, desc, total(秒), f(t)->bpm, base} ----
+const B = 65, HI = 120;
+const SCENARIOS = [
+  { name:'① 快速突刺', desc:'6 秒内 65→120：看 burst 触发',
+    total:14, f:t => t < 2 ? B : Math.min(HI, B + (HI-B) * ((t-2)/6)) },
+  { name:'② 缓慢爬升', desc:'45 秒 65→88：看颜色渐变，不该触发 burst',
+    total:60, f:t => B + 23 * Math.min(1, t/45) },
+  { name:'③ 稳态高强度', desc:'保持 120：看满红与迟滞',
+    total:30, f:() => HI },
+  { name:'④ 过山车', desc:'上冲→回落→再上冲：看特效冷却与回弹',
+    total:70, f:t => t<8 ? B : t<20 ? Math.min(HI, B+(HI-B)*((t-8)/12))
+                 : t<34 ? Math.max(B, HI-(HI-B)*((t-20)/14))
+                 : t<48 ? Math.min(HI+20, B+(HI+20-B)*((t-34)/14)) : B },
+  { name:'⑤ 锯齿震荡', desc:'在满红上下反复：专门测 redHold/redDrop 迟滞',
+    total:40, f:t => TH.red + 9 * Math.sin(t * 1.6) },
+  { name:'⑥ 随机漫游', desc:'65↔150 随机游走：看长时间表现',
+    total:80, f:(t, st) => { st.w = st.w ?? B;
+      st.w += (Math.random()-0.5) * 14; st.w = Math.max(55, Math.min(155, st.w)); return st.w; } },
+  { name:'⑦ 边界测试', desc:'在 burst 门槛附近来回：看是否会误触发/抖动',
+    total:30, f:t => TH.burstLow + 4 * Math.sin(t * 2.2) },
+  { name:'⑧ 极限', desc:'拉到 175：看 danger 区与上限',
+    total:26, f:t => t<6 ? B : Math.min(175, B + (175-B)*((t-6)/10)) },
+];
+
+// ---- 播放器 ----
+const S = { bpm: B, playing:false, t:0, scenario:null, st:{}, speed:2, lastTick:0, lastState:'' };
+function send(msg){ iframe.contentWindow.postMessage(msg, '*'); }
+function pushHR(){ send({ type:'hr', bpm: Math.round(S.bpm) }); }
+
+function play(scn){
+  S.scenario = scn; S.t = 0; S.st = {}; S.playing = true;
+  S.bpm = scn.f(0, S.st);
+  $('pause').textContent = '暂停';
+  pushHR(); syncUI();
+}
+function tick(now){
+  requestAnimationFrame(tick);
+  if(!S.playing) return;
+  const dtReal = (now - (S.lastTick||now)) / 1000;
+  S.lastTick = now;
+  if(dtReal <= 0) return;
+  S.t += dtReal * S.speed;
+  const scn = S.scenario;
+  if(scn){
+    S.bpm = scn.f(S.t, S.st);
+    if(S.t >= scn.total){ S.playing = false; $('pause').textContent = '继续'; }
+  }
+  pushHR(); syncUI();
+}
+function syncUI(){
+  const v = Math.round(S.bpm);
+  $('hr').value = v; $('hrNum').value = v;
+}
+
+// ---- 接收页面内部状态 ----
+const LOG = [];
+function onState(m){
+  $('vBpm').textContent = m.bpm ?? '--';
+  $('vFlush').textContent = m.flush.toFixed(2);
+  $('vBurst').textContent = m.burst.toFixed(2);
+  $('vRed').textContent = m.fullyRed ? '是' : '否';
+  $('vBR').textContent = (m.b==null?'--':Math.round(m.b)) + ' / ' + (m.r==null?'--':Math.round(m.r));
+  $('vFrame').textContent = m.frame;
+  const zone = m.bpm==null ? 'idle' : (m.bpm >= TH.danger ? 'danger' : (m.bpm >= TH.warn ? 'warn' : 'rest'));
+  $('pRest').className   = 'pill' + (zone==='rest'   ? ' on' : '');
+  $('pWarn').className   = 'pill' + (zone==='warn'   ? ' warn' : '');
+  $('pDanger').className = 'pill' + (zone==='danger' ? ' burst' : '');
+  $('pBurst').className  = 'pill' + (m.burst > 0.05 ? ' burst' : '');
+  $('pRed').className    = 'pill' + (m.fullyRed ? ' burst' : '');
+
+  const sig = `${m.frame}|${m.fullyRed}`;
+  if(sig !== S.lastState){
+    S.lastState = sig;
+    LOG.push({ t: S.t.toFixed(1), bpm:m.bpm, flush:m.flush, burst:m.burst, what:m.frame + (m.fullyRed?' +满红':'') });
+    renderLog();
+  }
+}
+window.addEventListener('message', ev => {
+  const m = ev.data;
+  if(m && m.type === 'state') onState(m);
+});
+function renderLog(){
+  const tb = $('logBody');
+  tb.innerHTML = LOG.slice(-80).map(r =>
+    `<tr><td>${r.t}s</td><td>${r.bpm}</td><td>${r.flush.toFixed(2)}</td><td>${r.burst.toFixed(2)}</td><td>${r.what}</td></tr>`
+  ).join('');
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+// ---- 皮肤对比三格 ----
+const SKINS = ['fish','ghost','xianyu'];
+const miniFrames = [];
+SKINS.forEach(sk => {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  cell.innerHTML = `<b>${sk}</b>`;
+  const f = document.createElement('iframe');
+  f.src = `/?bg=1&test=1&skin=${sk}`;
+  cell.appendChild(f);
+  $('grid3').appendChild(cell);
+  miniFrames.push(f);
+});
+setInterval(() => {
+  const msg = { type:'hr', bpm: Math.round(S.bpm) };
+  miniFrames.forEach(f => { try{ f.contentWindow.postMessage(msg,'*'); }catch(_){} });
+}, 120);
+
+// ---- 场景按钮 ----
+SCENARIOS.forEach(scn => {
+  const b = document.createElement('button');
+  b.className = 'scn';
+  b.innerHTML = `${scn.name}<small>${scn.desc}</small>`;
+  b.onclick = () => play(scn);
+  $('scenarios').appendChild(b);
+});
+
+// ---- 手动控件 ----
+function manual(bpm){
+  S.scenario = null; S.playing = false; $('pause').textContent='继续';
+  S.bpm = bpm; pushHR();
+}
+$('hr').oninput = e => { $('hrNum').value = e.target.value; manual(+e.target.value); };
+$('hrNum').oninput = e => { $('hr').value = e.target.value; manual(+e.target.value); };
+$('base').oninput = e => send({ type:'lock', bpm: e.target.value === '' ? null : +e.target.value });
+$('baseAuto').onclick = () => { $('base').value=''; send({ type:'lock', bpm:null }); };
+$('noise').onchange = e => send({ type:'noise', on:e.target.checked });
+$('speed').onchange = e => S.speed = +e.target.value;
+$('pause').onclick = () => { S.playing = !S.playing; $('pause').textContent = S.playing?'暂停':'继续'; };
+$('clearLog').onclick = () => { LOG.length = 0; renderLog(); };
+$('copyLog').onclick = () => {
+  const txt = LOG.map(r => `${r.t}s  ${r.bpm}bpm  flush=${r.flush.toFixed(2)} burst=${r.burst.toFixed(2)}  → ${r.what}`).join('\n');
+  navigator.clipboard.writeText(txt).then(()=>alert('已复制 '+LOG.length+' 行'),()=>alert('复制失败，请手动全选'));
+};
+document.addEventListener('keydown', e => {
+  if(e.code === 'Space'){ e.preventDefault(); $('pause').click(); }
+  if(e.key === 'r' || e.key === 'R'){ manual(B); $('hr').value = B; $('hrNum').value = B; }
+});
+
+// ---- 皮肤切换（作用于主 iframe，三格保持对比）----
+const skinSel = document.createElement('select');
+skinSel.style.cssText = 'background:#0f131b;color:#e8e6df;border:1px solid #2b3242;border-radius:6px;padding:4px';
+['fish','ghost','xianyu'].forEach(s => skinSel.add(new Option(s, s)));
+skinSel.onchange = () => { iframe.src = `/?bg=1&test=1&skin=${skinSel.value}`; };
+const hdr = document.querySelector('header');
+hdr.insertBefore(skinSel, hdr.querySelector('span[style*="flex"]'));
+
+iframe.addEventListener('load', () => { recomputeThresholds(); pushHR(); });
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

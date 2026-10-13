@@ -71,7 +71,7 @@ def remember_device(address: str) -> None:
 
 # 可调参数的默认值（与网页里的 P 对象保持一致）
 DEFAULT_PARAMS = {
-    "skin": "fish",              # 皮肤：fish（咸鱼）/ ghost（幽灵）
+    "skin": "fish",              # 皮肤：fish（咸鱼）/ ghost（幽灵）/ xianyu（咸鱼突刺）
     "minGap": 22, "maxGap": 30, "p90Offset": 3, "anchorTau": 15,
     "yellowAt": 0.4, "orangeAt": 0.7,
     "attack": 2, "release": 6, "redHold": 2, "redDrop": 5, "offlineAfter": 5,
@@ -408,6 +408,10 @@ def build_app(hub: Hub) -> web.Application:
                                 content_type="text/html", charset="utf-8")
         return web.Response(text=FALLBACK_PAGE, content_type="text/html", charset="utf-8")
 
+    async def effects(_request: web.Request) -> web.Response:
+        """Local-only visual sandbox. The iframe uses demo=1, never the BLE stream."""
+        return web.FileResponse(HERE / 'web' / 'effects.html')
+
     async def plain(_request: web.Request) -> web.Response:
         page = HERE / "web" / "plain.html"
         html = page.read_text(encoding="utf-8") if page.exists() else FALLBACK_PAGE
@@ -444,6 +448,14 @@ def build_app(hub: Hub) -> web.Application:
             return web.Response(text=page.read_text(encoding="utf-8"),
                                 content_type="text/html", charset="utf-8")
         return web.Response(text="console page missing", status=404)
+
+    async def test_bench(_request: web.Request) -> web.Response:
+        """验收台：精确驱动心率看动画（页面内嵌 ?test=1 的叠层）。"""
+        page = HERE / "web" / "test.html"
+        if page.exists():
+            return web.Response(text=page.read_text(encoding="utf-8"),
+                                content_type="text/html", charset="utf-8")
+        return web.Response(text="test page missing", status=404)
 
     async def logs_list(_request: web.Request) -> web.Response:
         """列出历史心率记录。"""
@@ -548,9 +560,16 @@ def build_app(hub: Hub) -> web.Application:
     app = web.Application()
     app.router.add_get("/", index)
     app.router.add_get("/plain", plain)
+    app.router.add_get("/effects", effects)
     app.router.add_get("/tune", tune)
     app.router.add_get("/console", console)
+    app.router.add_get("/test", test_bench)
     app.router.add_get("/theme.css", theme)
+    assets_dir = HERE / 'web' / 'assets'
+    if assets_dir.is_dir():
+        app.router.add_static('/assets', assets_dir)
+    else:
+        log.warning('assets 目录缺失，图片皮肤不可用：%s', assets_dir)
     app.router.add_get("/logs", logs_list)
     app.router.add_get("/replay", replay)
     app.router.add_post("/calibrate", calibrate)
