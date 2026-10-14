@@ -298,10 +298,11 @@ const SKIN_DEFS = {
   xianyu: { w: 30, h: 13 },  // 按最宽突刺帧预留，不挤压图片
 };
 
+const XIANYU_FRAMES = ['idle', 'alert_low', 'alert_mid', 'tense', 'high', 'charge', 'burst', 'recover'];
 const XIANYU_IMAGES = (() => {
   const base = '/assets/skins/xianyu/';
   const map = {};
-  ['idle', 'alert', 'attack', 'burst'].forEach(name => {
+  XIANYU_FRAMES.forEach(name => {
     const img = new Image();
     img.src = base + name + '.png';
     map[name] = img;
@@ -380,8 +381,8 @@ function drawCharacter(x, y, unit, opts) {
 const FISH_W = 18, FISH_H = 13;
 const CGX = 7.2, CGY = 6.4, RX = 6.6, RY = 4.6;
 
-// 咸鱼突刺皮肤的表现层；保留现有 BPM / P90 / burst 算法与全部原皮肤。
-const XIANYU_FX = { warmth: true, glow: true, kick: true };
+// 咸鱼突刺皮肤：图片负责姿态分层，代码只负责红温染色与心跳弹动。
+const XIANYU_FX = { warmth: true, kick: true };
 const XIANYU_TINT = document.createElement('canvas');
 const XIANYU_TINT_CTX = XIANYU_TINT.getContext('2d');
 let lastXianyuFrame = 'idle';
@@ -389,7 +390,6 @@ const clamp01 = n => Math.min(1, Math.max(0, n));
 const smooth01 = n => { const x = clamp01(n); return x * x * (3 - 2 * x); };
 
 // 每个心跳周期一次：迅速上弹，约半个周期内缓慢回位。
-// 相位仍取自 bpm / 60，未修改真正的心率采样与平滑算法。
 function xianyuBeatKick(beat) {
   const p = ((beat % 1) + 1) % 1;
   if (p < 0.12) return 1 - Math.pow(1 - p / 0.12, 3);
@@ -397,39 +397,48 @@ function xianyuBeatKick(beat) {
   return 0;
 }
 
+function pickXianyuFrame({ sleeping, flush = 0, burst = 0 }) {
+  if (sleeping) return 'idle';
+  if (burst > 0.42) return 'burst';
+  if (burst > 0.08) return 'recover';
+  if (flush >= 0.84) return 'charge';
+  if (flush >= 0.68) return 'high';
+  if (flush >= 0.52) return 'tense';
+  if (flush >= 0.34) return 'alert_mid';
+  if (flush >= 0.18) return 'alert_low';
+  return 'idle';
+}
+
+function xianyuLoaded(name) {
+  const image = XIANYU_IMAGES[name];
+  return image && image.complete && image.naturalWidth > 0 ? image : null;
+}
+
 function drawXianyu(ox, oy, unit, opts) {
   const { beat, sleeping, flush = 0, burst = 0 } = opts;
-  let frame = 'idle';
-  if (!sleeping) {
-    if (burst > 0.22) frame = 'burst';
-    else if (burst > 0.05) frame = 'attack';
-    else if (flush > 0.55) frame = 'alert';
-  }
+  const frame = pickXianyuFrame({ sleeping, flush, burst });
   lastXianyuFrame = frame;
-  const loaded = name => {
-    const image = XIANYU_IMAGES[name];
-    return image && image.complete && image.naturalWidth > 0 ? image : null;
-  };
-  const img = loaded(frame) || loaded('idle') || loaded('alert') || loaded('attack') || loaded('burst');
-  if (!img) return; // 加载中不闪回旧皮肤
+  const img = xianyuLoaded(frame)
+    || xianyuLoaded('idle') || xianyuLoaded('alert_low') || xianyuLoaded('alert_mid')
+    || xianyuLoaded('tense') || xianyuLoaded('high') || xianyuLoaded('charge')
+    || xianyuLoaded('burst') || xianyuLoaded('recover');
+  if (!img) return;
 
   const h = Math.round(SKIN_DEFS.xianyu.h * unit);
   const w = Math.round(h * img.naturalWidth / img.naturalHeight);
-  const heat = sleeping ? 0 : smooth01((flush - 0.25) / 0.70);
+  const heat = sleeping ? 0 : smooth01((flush - 0.22) / 0.72);
   const kick = sleeping ? 0 : xianyuBeatKick(beat);
-  const softBob = Math.sin(beat * Math.PI * 2) * unit * (sleeping ? 0.22 : 0.34 + 0.22 * flush);
-  const kickBlend = XIANYU_FX.kick ? smooth01((flush - 0.26) / 0.54) : 0;
-  const punchBob = -kick * unit * (0.55 + 0.55 * heat);
+  const softBob = Math.sin(beat * Math.PI * 2) * unit * (sleeping ? 0.18 : 0.28 + 0.18 * flush);
+  const kickBlend = XIANYU_FX.kick ? smooth01((flush - 0.22) / 0.58) : 0;
+  const punchBob = -kick * unit * (0.48 + 0.48 * heat);
   const bob = softBob * (1 - kickBlend) + punchBob * kickBlend;
-  const scale = XIANYU_FX.kick ? 1 + kick * heat * 0.025 : 1;
+  const scale = XIANYU_FX.kick ? 1 + kick * heat * 0.022 : 1;
   const dw = Math.round(w * scale), dh = Math.round(h * scale);
   const dx = Math.round(ox - (dw - w) / 2);
   const dy = Math.round(oy + bob - (dh - h) / 2);
 
-  // 单独离屏染色，防止 source-atop 改到画布里的心率线或其他 UI。
-  // 深色描边保留，最高只叠 24% 红色，避免鱼变成纯红色方块。
   let sprite = img;
-  const tint = XIANYU_FX.warmth ? heat * 0.24 + burst * 0.06 : 0;
+  const tint = XIANYU_FX.warmth ? heat * 0.22 + burst * 0.04 : 0;
   if (tint > 0.005 && XIANYU_TINT_CTX) {
     if (XIANYU_TINT.width !== w || XIANYU_TINT.height !== h) {
       XIANYU_TINT.width = w;
@@ -439,7 +448,7 @@ function drawXianyu(ox, oy, unit, opts) {
     XIANYU_TINT_CTX.imageSmoothingEnabled = false;
     XIANYU_TINT_CTX.drawImage(img, 0, 0, w, h);
     XIANYU_TINT_CTX.globalCompositeOperation = 'source-atop';
-    XIANYU_TINT_CTX.fillStyle = `rgba(255,51,43,${Math.min(0.30, tint).toFixed(3)})`;
+    XIANYU_TINT_CTX.fillStyle = `rgba(255,51,43,${Math.min(0.24, tint).toFixed(3)})`;
     XIANYU_TINT_CTX.fillRect(0, 0, w, h);
     XIANYU_TINT_CTX.globalCompositeOperation = 'source-over';
     sprite = XIANYU_TINT;
@@ -447,12 +456,6 @@ function drawXianyu(ox, oy, unit, opts) {
 
   ctx.save();
   ctx.imageSmoothingEnabled = false;
-  if (XIANYU_FX.glow && !sleeping && (heat > 0.06 || burst > 0.05)) {
-    const pulse = 0.35 + 0.65 * kick; // 心跳峰值时发光更强
-    const power = heat * pulse + burst * 0.8;
-    ctx.shadowColor = `rgba(255,54,38,${Math.min(0.80, 0.55 * power).toFixed(3)})`;
-    ctx.shadowBlur = 4 + 15 * power;
-  }
   ctx.drawImage(sprite, dx, dy, dw, dh);
   ctx.restore();
 }
@@ -769,9 +772,10 @@ let TEST_HR = null, TEST_NOISE = false, TEST_BASE = null;
 
 // 当前会画哪一帧（与 drawXianyu 的判据保持一致，验收时看得见）
 function currentFrame() {
-  const zone = state.zone || 'idle';
   const flush = algo.pSmooth, burst = algo.burst;
   const sleeping = state.bpm == null || !state.connected;
+  if (P.skin === 'xianyu') return sleeping ? 'idle(离线)' : pickXianyuFrame({ sleeping, flush, burst });
+  const zone = state.zone || 'idle';
   if (sleeping) return 'idle(离线)';
   if (burst > 0.55) return 'burst';
   if (burst > 0.08 || zone === 'danger') return 'attack';

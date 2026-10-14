@@ -31,7 +31,7 @@ button.primary { background:#99342f; border-color:#ee5546; font-weight:700; }
 .action-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 fieldset { border:1px solid var(--edge); border-radius:9px; margin:14px 0 0; padding:9px 12px 12px; }
 legend { color:var(--muted); font-size:12px; padding:0 5px; }
-.toggles { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+.toggles { display:grid; grid-template-columns:repeat(2,1fr); gap:6px; }
 .toggles label { font-size:12px; cursor:pointer; line-height:2; white-space:nowrap; }
 .toggles input { accent-color:var(--accent); vertical-align:middle; }
 .copy { margin-top:17px; padding-top:12px; border-top:1px solid var(--edge); font-size:12px; color:var(--muted); }
@@ -76,7 +76,6 @@ code { font-family:Consolas,monospace; color:#ffb78b; }
       <legend>效果开关：方便对比前后差异（仅本页）</legend>
       <div class="toggles">
         <label><input type="checkbox" id="warmth" checked> 红温染色</label>
-        <label><input type="checkbox" id="glow" checked> 红色脉冲光</label>
         <label><input type="checkbox" id="kick" checked> 有力的心跳弹动</label>
       </div>
     </fieldset>
@@ -88,7 +87,7 @@ code { font-family:Consolas,monospace; color:#ffb78b; }
 <script>
 const $ = id => document.getElementById(id);
 const preview = $('preview');
-const FX_KEYS = ['warmth', 'glow', 'kick'];
+const FX_KEYS = ['warmth', 'kick'];
 let rampTimer = null;
 let ready = false;
 function transmit(extra = {}) {
@@ -135,7 +134,7 @@ window.addEventListener('message', ev => {
   const d = ev.data;
   if (!d || d.type !== 'fish-demo-state') return;
   $('liveBpm').textContent = d.bpm ?? '—';
-  $('frame').textContent = ({idle:'待机',alert:'警戒',attack:'突刺准备',burst:'爆发突刺'})[d.frame] || d.frame;
+  $(`frame`).textContent = ({idle:'待机',alert_low:'轻警觉',alert_mid:'警戒',tense:'紧张',high:'高压',charge:'蓄力前摇',burst:'爆发突刺',recover:'突刺收招'})[d.frame] || d.frame;
   $('intensity').textContent = `${Math.round(d.intensity*100)}%`;
   $('frequency').textContent = `${d.heartbeatHz} Hz`;
   $('limits').textContent = `${d.base} / ${d.red}`;
