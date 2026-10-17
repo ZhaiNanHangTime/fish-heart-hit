@@ -1,0 +1,15 @@
+{
+  "verification": "read-only installed HTTP checks; text normalized for HTTP newline conversion; current window was not auto-clicked",
+  "identity_matches": true,
+  "seven_public_frontend_resources_match_release": true,
+  "hud_alive": true,
+  "saved_appearance_preserved": true,
+  "fishWidth": 1.5,
+  "fishScale": 1.35,
+  "hud_size": [
+    381,
+    95
+  ],
+  "device_connected_at_check": true,
+  "live_configuration_test_writes": 0
+}

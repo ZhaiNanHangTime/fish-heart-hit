@@ -1,0 +1,23 @@
+{
+  "installed": true,
+  "target": "G:\\downloads\\heart-rate",
+  "backup": "G:\\downloads\\heart-rate-backups\\before-fish-width-20261016-164402",
+  "changed_code_files": 7,
+  "private_files_verified": 39,
+  "private_hashes_match": true,
+  "graceful_restart": true,
+  "oneclick_entry_invoked": true,
+  "current_window_ui_verified": false,
+  "default_hud_size": [
+    240,
+    104
+  ],
+  "http_verified": true,
+  "device_connected_at_check": true,
+  "fishWidth_at_check": 1.5,
+  "original_pngs_unchanged": true,
+  "unit_tests": 28,
+  "parity_cases": 108,
+  "all_native_browser_rgba_match": true,
+  "live_test_parameter_writes": 0
+}

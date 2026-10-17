@@ -1,0 +1,11 @@
+{
+  "installed": true,
+  "target": "G:\\downloads\\heart-rate",
+  "backup": "G:\\downloads\\heart-rate-backups\\before-classical-design-20261016-222350",
+  "changed_code_files": 8,
+  "private_files_verified": 42,
+  "private_hashes_match": true,
+  "graceful_restart": true,
+  "oneclick_entry_invoked": true,
+  "current_window_ui_verified": false
+}

@@ -1,0 +1,21 @@
+{
+  "environment": "visible Chrome; isolated synthetic service; no actual heart-rate or private configuration",
+  "checks": [
+    "new theme is served; saved 150% preset is visibly selected; body text and end-session text meet 4.5:1 contrast",
+    "380, 390, 768, 1024, 1440px: no horizontal overflow; all three tabs expose the requested controls",
+    "history, advanced parameters and behavior tools all load the shared pine theme, with no horizontal overflow at desktop embedded width",
+    "reduced motion, visible keyboard focus, no external runtime resources, no page errors"
+  ],
+  "page_errors": [],
+  "contrast_ratios": {
+    "body": 8.928685302018804,
+    "end_session": 6.0907662922471175
+  },
+  "viewports": [
+    380,
+    390,
+    768,
+    1024,
+    1440
+  ]
+}

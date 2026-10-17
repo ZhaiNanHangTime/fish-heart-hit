@@ -1,0 +1,23 @@
+{
+  "installed": true,
+  "target": "G:\\downloads\\heart-rate",
+  "backup": "G:\\downloads\\heart-rate-backups\\before-control-audit-20261016-214651",
+  "changed_code_files": 6,
+  "private_files_verified": 41,
+  "private_hashes_match": true,
+  "graceful_restart": true,
+  "oneclick_entry_invoked": true,
+  "current_window_ui_verified": false,
+  "default_hud_size": [
+    240,
+    104
+  ],
+  "http_verified": true,
+  "unit_tests": 29,
+  "browser_groups": 12,
+  "actual_action_groups": 12,
+  "pixel_parity_cases": 108,
+  "default_width_preserved": true,
+  "device_connected_at_check": true,
+  "fresh_heart_rate_at_check": true
+}

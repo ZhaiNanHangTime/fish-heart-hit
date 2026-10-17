@@ -1,0 +1,10 @@
+{
+  "entry": "一键开播（总控+悬浮窗）.vbs",
+  "invoked_twice": true,
+  "before_service_and_hud_count": 2,
+  "after_service_and_hud_count": 2,
+  "hud": true,
+  "error": "",
+  "backup": "G:\\downloads\\heart-rate-backups\\before-oneclick-hud-20261016-134502",
+  "personal_configuration_writes": false
+}

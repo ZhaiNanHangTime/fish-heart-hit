@@ -1,0 +1,5 @@
+{
+  "service_processes": 1,
+  "managed_hud_processes": 1,
+  "window_ui_not_checked": true
+}

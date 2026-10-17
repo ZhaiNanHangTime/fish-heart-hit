@@ -1,0 +1,2 @@
+one-click reached Python without opening a console
+PASS: second VBS entry executed through cscript -> wscript -> pythonw with --hud in isolated stub directory.

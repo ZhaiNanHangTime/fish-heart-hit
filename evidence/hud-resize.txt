@@ -1,0 +1,7 @@
+PASS: actual pointer drag resizes immediately; release persists through HTTP/SSE; one Tk window; OBS dimensions unchanged
+PASS: total-control size changes reach the same native window
+PASS: failed save is visible and retry saves the requested size
+PASS: corner cursor, mouse-wheel zoom and double-click preset handler persist
+PASS: independent width/height limits, whole-pixel layout and resize controls hidden after editing
+PASS: native shared appearance HTTP; second SSE output follows skin/scale; visual-adjust shortcut uses one launcher; remote border commands; failure/retry; exact-size sprite fits
+Native interactive HUD checks complete; synthetic data only.

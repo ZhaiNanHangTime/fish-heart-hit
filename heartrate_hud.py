@@ -9,19 +9,21 @@
 
 用法:
     python heartrate_hud.py                 # 默认
-    python heartrate_hud.py --scale 4       # 放大（2~5）
+    python heartrate_hud.py --scale 4       # 兼容旧入口；宽高现在跟随总控
     python heartrate_hud.py --opaque        # 不透明背景（调试/兼容）
     python heartrate_hud.py --skin ghost    # 幽灵皮肤（缺省跟随服务端 /params 的 skin）
 
 操作:
-    左键拖动 / 右键菜单（重置、置顶、退出）/ 双击换大小
-    位置记在 hud.json
+    左键移动 / 右键调整尺寸，拖右下角，松手保存 / 调整模式下滚轮缩放 / 双击切换预设
+    位置记在 hud.json，宽高由总控 params.json 统一保存
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import math
+import queue
 import subprocess
 import sys
 import threading
@@ -29,6 +31,9 @@ import time
 import tkinter as tk
 from pathlib import Path
 from urllib.request import Request, urlopen
+from hr_config import DEFAULT_PARAMS, LIMITS
+from hr_client import SnapshotClient
+from hr_visual import layout as visual_layout, sprite_png
 
 HERE = Path(__file__).resolve().parent
 SETTINGS = HERE / "hud.json"
@@ -116,61 +121,16 @@ def mix_color(c1: str, c2: str, k: float) -> str:
 
 
 # ---------- 冻结版算法参数（启动时会被服务端 /params 覆盖） ----------
-P = {
-    "minGap": 22.0,      # R ≥ B + minGap（防假红，实测甜点 22）
-    "maxGap": 30.0,      # R ≤ B + maxGap（防抗红；原来 45 会让 R 顶到 114）
-    "p90Offset": 3.0,    # R = P90 − 该值
-    "yellowAt": 0.4,     # 黄锚在 B→R 区间的位置
-    "orangeAt": 0.7,     # 橙锚位置
-    "anchorTau": 15.0,   # 阈值跟随时间常数（秒）
-    "attack": 2.0,       # 上色时间常数（秒）
-    "release": 6.0,      # 褪色时间常数（秒）
-    "redHold": 2.0,      # 连续达阈值多久算满红（秒）
-    "redDrop": 5.0,      # 回落多少解除满红（bpm）
-    "offlineAfter": 5.0, # 多久没数据算离线（秒）
-    "burstRise": 10.0,   # 窗口内涨多少触发特效（bpm）
-    "burstAbove": 15.0,  # 且要高于基线多少（bpm）
-    "burstWindow": 30.0, # 涨幅观察窗口（秒）
-    "burstCooldown": 30.0,  # 特效冷却（秒）
-}
+P = dict(DEFAULT_PARAMS)  # read-only mirror of server snapshots
 BASE_FALLBACK = 70.0
 BASE_SAMPLES = 40
-LOCKED_BASE: float | None = None     # 服务端在开播头 3 分钟锁定后下发，之后不再漂移
+LOCKED_BASE: float | None = None     # latest server baseline; may slowly follow P25
 SKIN_NAME = 'fish'                    # 当前皮肤：fish（咸鱼）/ ghost（幽灵）
-
-
-def load_remote_params(base: str, apply_skin: bool = True) -> None:
-    """把 /tune 面板保存到服务端的参数拉过来。
-
-    apply_skin=False 时只同步数值参数、不动皮肤（渲染验收脚本用）。
-    """
-    try:
-        with urlopen(f"{base}/params", timeout=3) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        for k, v in (data or {}).items():
-            if k in P:
-                try:
-                    P[k] = float(v)
-                except (TypeError, ValueError):
-                    pass
-            elif k == 'skin' and apply_skin and str(v) in ('fish', 'ghost'):
-                global SKIN_NAME
-                SKIN_NAME = str(v)
-    except Exception:  # noqa: BLE001
-        pass
-
-
-def log_skin_change(old: str, new: str) -> None:
-    print(f"[hud] 皮肤切换：{old} → {new}", file=sys.stderr, flush=True)
 
 
 def base_heart(stats: dict) -> float:
     if LOCKED_BASE is not None:
         return LOCKED_BASE
-    s = stats or {}
-    if (s.get("samples") or 0) >= BASE_SAMPLES and s.get("min") is not None and s.get("avg") is not None:
-        # 锁定前的临时估计：落在「本场最低」与「本场平均」之间偏平静的一侧（1/4 处）
-        return max(45.0, float(s["min"]) + (float(s["avg"]) - float(s["min"])) * 0.25)
     return BASE_FALLBACK
 
 
@@ -198,8 +158,8 @@ class HeartHud:
         self.api = api
         self.base = api.rsplit("/hr", 1)[0]
         self.scale = scale
-        self.follow_remote_skin = watch_skin          # False = 已按服务端皮肤重启过，别再重启
-        load_remote_params(self.base, apply_skin=apply_skin)   # 拉取 /tune 面板保存的参数
+        self.follow_remote_skin = watch_skin  # explicit --skin can pin the local preview
+        self.stream = SnapshotClient(self.base)
         self.state: dict = {"bpm": None, "zone": "idle", "connected": False,
                             "stats": {}, "recent": {}}
         self.history: list = []
@@ -216,8 +176,26 @@ class HeartHud:
         self.last_tick = time.time()
         self.started = time.time()
         self.last_skin_check = 0.0
+        self.stage_index = 0
+        self.sprite_cache = {}
+        self.tint_cache = {}
+        self.render_signature = None
+        self.stop_requested = threading.Event()
+        self.commands = queue.SimpleQueue()
+        self.sprite_meta = json.loads((HERE/"web/assets/skins/xianyu/frames.json").read_text(encoding="utf-8"))
         self.topmost = True
         self.drag = (0, 0)
+        self.resize_mode = False
+        self.resize_drag = None
+        self.local_size = None
+        self.size_ack_version = None
+        self.size_error = ""
+        self.size_requests = queue.Queue()
+        self.appearance_error = ""
+        self.size_results = queue.SimpleQueue()
+        self.size_worker_stop = threading.Event()
+        self.size_worker = None
+        self.scene_signature = None
 
         self.root = tk.Tk()
         self.root.title("咸鱼突刺 · 心率")
@@ -245,32 +223,47 @@ class HeartHud:
         self._build_scene()
         self._restore_position()
         self._bind_events()
-        threading.Thread(target=self._poll_loop, daemon=True).start()
         self.root.after(40, self._tick)
 
     # ---------- 布局 ----------
 
     def _layout(self) -> None:
-        s = self.scale
-        self.pad = s + 2
-        self.fish_unit = s
-        self.fish_w = FISH_W * s
-        self.fish_h = FISH_H * s
-        self.dot = 2 * s
-        self.digit_w = 4 * self.dot * 3
-        self.digit_h = 5 * self.dot
-        self.gap = 3 * s
-        self.dot_r = max(2, s)
+        self.w, self.h = self._limit_size(*(self.local_size or (P["hudWidth"], P["hudHeight"])))
+        self.visual = visual_layout(self.w,self.h,{**P,'skin':SKIN_NAME},'hud')
+        v=self.visual
+        self.scale=v['unit'];self.pad=v['pad'];self.character_scale=v['character_scale']
+        self.fish_unit=self.scale*self.character_scale if SKIN_NAME!='xianyu' else self.scale
+        self.fish_w=FISH_W*self.fish_unit;self.fish_h=FISH_H*self.fish_unit
+        self.dot=v['dot'];self.digit_w,self.digit_h=v['digit_size']
+        self.gap=3*self.scale;self.dot_r=max(2,self.scale)
+        self.center_y=v['trace_y'];self.amp=v['trace_amp']
+        self.fish_org=tuple(v['fish_origin']);self.digit_org=tuple(v['digit_origin'])
 
-        body_h = max(self.fish_h, self.digit_h)
-        self.w = self.pad * 2 + self.fish_w + self.gap + self.digit_w + self.pad * 2
-        self.h = self.pad * 2 + body_h + 4 * s
-        self.center_y = self.h / 2
-        self.amp = max(6, (self.h - self.pad * 2) / 2 * 0.95)
+    @staticmethod
+    def _limit_size(width, height):
+        return tuple(max(LIMITS[key][0], min(LIMITS[key][1], round(value)))
+                     for key, value in [("hudWidth",width),("hudHeight",height)])
 
-        self.fish_org = (self.pad, self.center_y - self.fish_h / 2 + self.fish_unit * 0.5)
-        self.digit_org = (self.pad + self.fish_w + self.gap,
-                          self.center_y - self.digit_h / 2)
+    def _sync_layout(self):
+        size = self._limit_size(*(self.local_size or (P["hudWidth"],P["hudHeight"])))
+        signature = (SKIN_NAME,P["fishScale"],P.get('fishWidth',1),P.get("traceLayout","overlay"),*size)
+        if signature == self.render_signature:
+            return
+        self.render_signature = signature
+        self._layout()
+        self.canvas.config(width=self.w,height=self.h)
+        self.root.geometry(f"{self.w}x{self.h}")
+        scene = (SKIN_NAME,self.scale,self.character_scale,tuple(self.visual['sprite_rect'][2:]))
+        if scene != self.scene_signature:
+            self.scene_signature = scene
+            self.canvas.delete("all")
+            self.sprite_cache.clear()
+            self.tint_cache.clear()
+            self._build_scene()
+            if SKIN_NAME == "xianyu":
+                self.sprite_item = self.canvas.create_image(0,0,anchor="nw")
+        elif self.panel is not None:
+            self.canvas.coords(self.panel,0,0,self.w,self.h)
 
     # ---------- 场景构建（只做一次） ----------
 
@@ -288,6 +281,7 @@ class HeartHud:
                                              capstyle='butt', joinstyle='miter')
         self.trace_dot = self._new(max(3, self.scale * 1.4))
 
+        self.fx_items = [self._new() for _ in range(9)]
         # 小矛（先建，鱼身盖住中段）
         self.spear_shaft = [(SPEAR_BX + i * SPEAR_DX, SPEAR_BY + i * SPEAR_DY,
                              self._new(), self._new()) for i in range(SPEAR_N)]
@@ -352,6 +346,11 @@ class HeartHud:
             self.panel = self.canvas.create_rectangle(0, 0, self.w, self.h,
                                                       fill=PANEL, outline='#232833')
             self.canvas.tag_lower(self.panel)
+        self.resize_bg = self.canvas.create_rectangle(0,0,self.w,self.h,fill='#151d25',outline='',state='hidden')
+        self.canvas.tag_lower(self.resize_bg)
+        self.resize_border = self.canvas.create_rectangle(1,1,self.w-1,self.h-1,outline='#ffad76',dash=(3,3),state='hidden')
+        self.resize_label = self.canvas.create_text(8,8,anchor='nw',fill='#ffad76',font=('Microsoft YaHei',9),state='hidden')
+        self.resize_grip = [self.canvas.create_line(0,0,0,0,fill='#ffad76',width=2,state='hidden') for _ in range(3)]
 
     # ---------- 位置记忆 ----------
 
@@ -383,31 +382,131 @@ class HeartHud:
     def _bind_events(self) -> None:
         self.canvas.bind("<Button-1>", self._start_drag)
         self.canvas.bind("<B1-Motion>", self._on_drag)
-        self.canvas.bind("<ButtonRelease-1>", lambda _e: self._save_position())
+        self.canvas.bind("<ButtonRelease-1>", self._finish_drag)
         self.canvas.bind("<Double-Button-1>", self._toggle_scale)
         self.canvas.bind("<Button-3>", self._menu)
+        self.canvas.bind("<Motion>", self._pointer_motion)
+        self.canvas.bind("<MouseWheel>", self._resize_wheel)
         self.root.protocol("WM_DELETE_WINDOW", self._quit)
 
     def _start_drag(self, event) -> None:
-        self.drag = (event.x, event.y)
+        if self.resize_mode and event.x >= self.w-24 and event.y >= self.h-24:
+            self.resize_drag = (event.x_root,event.y_root,self.w,self.h)
+            self.canvas.grab_set()
+        else:
+            self.resize_drag = None
+            self.drag = (event.x, event.y)
 
     def _on_drag(self, event) -> None:
+        if self.resize_drag:
+            x,y,w,h = self.resize_drag
+            self._resize_to(w+event.x_root-x,h+event.y_root-y)
+            return
         self.root.geometry(f"+{self.root.winfo_x() + event.x - self.drag[0]}"
                            f"+{self.root.winfo_y() + event.y - self.drag[1]}")
 
-    def _toggle_scale(self, _event=None) -> None:
-        self.scale = 2 if self.scale >= 5 else self.scale + 1
+    def _finish_drag(self, _event=None):
+        if self.resize_drag:
+            self.resize_drag = None
+            self.canvas.grab_release()
+            self._commit_size()
         self._save_position()
-        api, scale = self.api, self.scale
-        self.root.destroy()
-        subprocess.Popen([sys.executable, str(HERE / "heartrate_hud.py"),
-                          "--api", api, "--scale", str(scale)],
-                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+    def _pointer_motion(self,event):
+        corner = self.resize_mode and event.x>=self.w-24 and event.y>=self.h-24
+        self.canvas.config(cursor='sizing' if corner else 'fleur')
+
+    def _resize_to(self,width,height):
+        self.local_size = self._limit_size(width,height)
+        self.size_ack_version = None
+        self.size_error = ""
+        self._sync_layout()
+        self._draw()
+        self._draw_resize_controls()
+
+    def _resize_wheel(self,event):
+        if self.resize_mode and event.delta:
+            factor = 1.1 if event.delta>0 else 1/1.1
+            self._resize_to(self.w*factor,self.h*factor)
+            self._commit_size()
+            return 'break'
+
+    def _toggle_resize_mode(self):
+        self.resize_mode = not self.resize_mode
+        self._draw_resize_controls()
+
+    def _draw_resize_controls(self):
+        visible = self.resize_mode or bool(self.size_error)
+        for item in [self.resize_bg,self.resize_border,self.resize_label,*self.resize_grip]:
+            self.canvas.itemconfig(item,state='normal' if visible else 'hidden')
+        if not visible:
+            return
+        self.canvas.coords(self.resize_bg,0,0,self.w,self.h)
+        self.canvas.tag_lower(self.resize_bg)
+        self.canvas.coords(self.resize_border,1,1,self.w-1,self.h-1)
+        message = '尺寸未保存·右键重试' if self.size_error else f'{self.w} × {self.h}  ·  拖右下角'
+        self.canvas.itemconfig(self.resize_label,text=message)
+        for index,item in enumerate(self.resize_grip):
+            length=5+index*5
+            self.canvas.coords(item,self.w-length-4,self.h-4,self.w-4,self.h-length-4)
+        for item in [self.resize_border,self.resize_label,*self.resize_grip]:self.canvas.tag_raise(item)
+
+    def _commit_size(self):
+        size = self.local_size or (self.w,self.h)
+        if self.size_worker is None:
+            self.size_worker = threading.Thread(target=self._size_worker,daemon=True)
+            self.size_worker.start()
+        self.size_requests.put_nowait(size)
+
+    def _size_worker(self):
+        while not self.size_worker_stop.is_set():
+            try:size=self.size_requests.get(timeout=.2)
+            except queue.Empty:continue
+            try:
+                payload = size if isinstance(size,dict) else dict(zip(('hudWidth','hudHeight'),size))
+                body=json.dumps(payload).encode()
+                request=Request(self.base+'/params',data=body,headers={'Content-Type':'application/json'})
+                with urlopen(request,timeout=4) as response:
+                    params=json.loads(response.read())
+                    version=int(response.headers.get('X-Params-Version','0'))
+                if any(params.get(key)!=value for key,value in payload.items()):
+                    raise ValueError('服务未接受请求的设置，请更新后重试')
+                self.size_results.put((size,version,''))
+            except Exception as exc:
+                self.size_results.put((size,None,str(exc)))
+
+    def _receive_size_result(self):
+        while not self.size_results.empty():
+            size,version,error = self.size_results.get()
+            if isinstance(size,dict):
+                self.appearance_error = error
+            elif size == self.local_size:
+                self.size_ack_version = version
+                self.size_error = error
+
+    def _toggle_scale(self, _event=None):
+        presets=[(240,104),(312,102),(416,136),(640,280),(960,420)]
+        current=(self.w,self.h)
+        index=(presets.index(current)+1)%len(presets) if current in presets else 0
+        self._resize_to(*presets[index])
+        self._commit_size()
+        self._save_position()
 
     def _menu(self, event) -> None:
         menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label='完成尺寸调整' if self.resize_mode else '调整尺寸（拖右下角）',command=self._toggle_resize_mode)
+        if self.size_error:menu.add_command(label='重试保存尺寸',command=self._commit_size)
+        menu.add_command(label=f'当前尺寸：{self.w} × {self.h}',state='disabled')
+        menu.add_command(label='大小与外观（可视化总控）…',command=self._open_adjustments)
+        skins=tk.Menu(menu,tearoff=0)
+        skin_var=tk.StringVar(value=SKIN_NAME)
+        for key,label in [('xianyu','红巾咸鱼'),('fish','原版咸鱼'),('ghost','幽灵')]:
+            skins.add_radiobutton(label=label,variable=skin_var,value=key,command=lambda value=key:self._commit_appearance({'skin':value}))
+        menu.add_cascade(label='皮肤（同步OBS）',menu=skins)
+        if self.appearance_error:menu.add_command(label='外观保存失败，打开面板重试',command=self._open_adjustments)
+        menu.add_separator()
         menu.add_command(label="重置统计", command=self._reset)
-        menu.add_command(label=f"切换皮肤：{'幽灵' if SKIN_NAME == 'ghost' else '咸鱼'}",
+        menu.add_command(label="皮肤与参数（工作台）",
                          command=self._toggle_skin)
         menu.add_command(label=f"置顶：{'开' if self.topmost else '关'}", command=self._toggle_topmost)
         menu.add_separator()
@@ -424,75 +523,33 @@ class HeartHud:
             pass
 
     def _toggle_skin(self) -> None:
-        """右键切换皮肤：先把选择写回服务端 /params，再以新皮肤重启自己。
+        self._open_adjustments()
 
-        顺序有讲究：先写服务端，重启出来的新进程读 /params 时才会看到新皮肤，
-        不会出现"重启完又变回旧皮肤"。
-        """
-        new_skin = 'fish' if SKIN_NAME == 'ghost' else 'ghost'
-        self._push_skin(new_skin)
-        self._restart_with_skin(new_skin)
+    def _commit_appearance(self, changes):
+        # All outputs use the server configuration, never a HUD-only skin flag.
+        self.follow_remote_skin = True
+        if self.size_worker is None:
+            self.size_worker = threading.Thread(target=self._size_worker,daemon=True)
+            self.size_worker.start()
+        self.size_requests.put_nowait(dict(changes))
 
-    def _push_skin(self, new_skin: str) -> None:
-        """把皮肤写进服务端参数（写失败不阻塞切换，本地照样生效）。"""
-        payload = json.dumps({"skin": new_skin}).encode("utf-8")
-        for _attempt in range(2):
-            try:
-                req = Request(f"{self.base}/params", data=payload,
-                              headers={"Content-Type": "application/json"})
-                urlopen(req, timeout=3).read()
-                return
-            except Exception:  # noqa: BLE001
-                time.sleep(0.5)
-
-    def _restart_with_skin(self, new_skin: str) -> None:
-        """换皮肤要重建画布图元，直接以新 --skin 重启一个自己（与双击换大小同一套路）。
-
-        --no-skin-watch 很关键：否则新进程起来后又发现服务端皮肤与启动参数一致时还好，
-        但若不一致就会再次重启，形成重启循环。
-        """
-        self._save_position()
-        api, scale = self.api, self.scale
-        self.root.destroy()
-        subprocess.Popen([sys.executable, str(HERE / "heartrate_hud.py"),
-                          "--api", api, "--scale", str(scale), "--skin", new_skin,
-                          "--no-skin-watch"],
-                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    def _open_adjustments(self):
+        # Reuse the one control window, whose preview uses this HUD's exact layout.
+        from urllib.parse import urlsplit
+        subprocess.Popen([sys.executable,str(HERE/'app_launcher.py'),'--port',str(urlsplit(self.base).port or 8080),'--panel','hud-size'],
+                         cwd=str(HERE),creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
 
     def _toggle_topmost(self) -> None:
         self.topmost = not self.topmost
         self.root.attributes("-topmost", self.topmost)
 
     def _quit(self) -> None:
+        self.size_worker_stop.set()
+        self.stream.close()
         self._save_position()
         self.root.destroy()
 
     # ---------- 数据 ----------
-
-    def _poll_loop(self) -> None:
-        tick = 0
-        while True:
-            try:
-                with urlopen(self.api, timeout=3) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                self.state = {
-                    "bpm": data.get("bpm"),
-                    "zone": data.get("zone", "idle"),
-                    "connected": data.get("connected", False),
-                    "stats": data.get("stats", {}) or {},
-                    "recent": data.get("recent", {}) or {},
-                }
-            except Exception:  # noqa: BLE001
-                self.state = {"bpm": None, "zone": "idle", "connected": False,
-                              "stats": {}, "recent": {}}
-            tick += 1
-            if tick % 3 == 0:
-                try:
-                    with urlopen(f"{self.base}/history", timeout=3) as resp:
-                        self.history = json.loads(resp.read().decode("utf-8")).get("samples", [])
-                except Exception:  # noqa: BLE001
-                    pass
-            time.sleep(0.5)
 
     # ---------- 绘制原语 ----------
 
@@ -607,6 +664,74 @@ class HeartHud:
 
         self._draw_status_and_digits()   # 数字与状态点：两套皮肤共用
 
+    def _draw_fx(self):
+        for item in self.fx_items:
+            self._hide(item)
+        if self.burst <= .05 or SKIN_NAME == "ghost" or (SKIN_NAME == "xianyu" and self.sprite_meta.get("baked_effects", False)):
+            return
+        s = self.scale
+        ox, _ = self.fish_org
+        for i, item in enumerate(self.fx_items):
+            if i < 3:
+                self._show_rect(item, TRACE, ox-(i+1)*1.6*s, self.h*.12+(i+1)*.8*s, s, max(1,s*.4))
+            else:
+                x = min(self.w*.58, ox+18*s+(i-3)*s)
+                y = self.h*(.09 if i%2 else .57) + (i%3)*.6*s
+                self._show(item, SWEAT, round(x), round(y), max(1,round(s*.6)))
+
+    def _draw_xianyu(self):
+        frames = ["idle", "alert_low", "alert_mid", "tense", "high", "charge"]
+        delta = (self.state.get("bpm") or 0) - (self.anchors[0] if self.anchors else BASE_FALLBACK)
+        if not self.live:
+            self.stage_index = 0
+        else:
+            while self.stage_index < 5 and delta >= (self.stage_index+1)*4+2:
+                self.stage_index += 1
+            while self.stage_index > 0 and delta < self.stage_index*4-2:
+                self.stage_index -= 1
+        if self.live and type(self.state.get("visual_stage")) is int:
+            self.stage_index = self.state["visual_stage"]
+        name = frames[self.stage_index]
+        if self.live and self.burst > .30:
+            name = "burst"
+        elif self.live and self.burst > .08:
+            name = "recover"
+        # Tk subsampling keeps nearest-neighbour pixels and the original aspect ratio.
+        if name not in self.sprite_cache:
+            path = HERE / "web" / "assets" / "skins" / "xianyu" / (name + ".png")
+            try:
+                _,_,width,height=self.visual['sprite_rect']
+                png=sprite_png(name,int(width),int(height))
+                self.sprite_cache[name]=tk.PhotoImage(data=base64.b64encode(png))
+            except tk.TclError:
+                self._hide(self.sprite_item)
+                return
+        image = self.sprite_cache[name]
+        heat = max(0., min(1., (self.p_smooth-.25)/.70))
+        heat = heat*heat*(3-2*heat)
+        tint_level = round((heat*.24 + self.burst*.06)*24) if P["fxWarmth"] and self.live else 0
+        if tint_level:
+            key = (name, tint_level)
+            if key not in self.tint_cache:
+                tinted = image.copy()
+                factor = min(.30, tint_level/24)
+                for py in range(image.height()):
+                    for px in range(image.width()):
+                        if image.transparency_get(px, py):
+                            continue
+                        rgb = image.get(px, py)
+                        color = '#%02x%02x%02x' % tuple(round(c+(t-c)*factor) for c,t in zip(rgb,(255,51,43)))
+                        tinted.put(color, (px,py))
+                self.tint_cache[key] = tinted
+            image = self.tint_cache[key]
+        ox, oy = self.fish_org
+        kick = max(0, math.sin(self.phase*2*math.pi))**3 if P["fxKick"] and self.live else 0
+        ix,iy,_,_=self.visual['sprite_rect']
+        x = ix+round(self.burst*self.scale*3)
+        y = iy-round(kick*max(1,self.scale*.25))
+        self.canvas.itemconfig(self.sprite_item, image=image, state="normal")
+        self.canvas.coords(self.sprite_item, x, y)
+
     def _draw(self) -> None:
         st = self.state
         bpm = st.get("bpm")
@@ -626,6 +751,12 @@ class HeartHud:
 
         # ---- 1) 心率线（最底层）----
         self._draw_trace()
+        self._draw_fx()
+
+        if SKIN_NAME == 'xianyu':
+            self._draw_xianyu()
+            self._draw_status_and_digits()
+            return
 
         if SKIN_NAME == 'ghost':        # 幽灵皮肤走独立分支，不碰下面鱼的绘制代码
             self._draw_ghost_only(skin['line'])
@@ -635,8 +766,8 @@ class HeartHud:
         vigor = 0.75 + flush * 0.5 + self.burst * 0.7     # 心率越高 / 爆发时，突刺越有劲
         thrust = 0.0 if sleeping else (max(0.0, math.sin(self.phase * 2 * math.pi)) ** 3) * vigor
         jitter = (math.sin(time.time() * 37) * u * 0.30) if zone == 'danger' else 0.0
-        sx = ox + thrust * u * 1.2 + jitter
-        sy = oy + thrust * u * 0.25
+        sx = ox + thrust * u * 1.2 * (1-self.burst) + jitter * (1-self.burst) + self.burst*u*3
+        sy = oy + thrust * u * 0.25 * (1-self.burst)
         hot = (not sleeping) and flush > 0.35
 
         # ---- 2) 小矛 ----
@@ -695,7 +826,7 @@ class HeartHud:
         st = self.state
         bpm = st.get("bpm")
         # ---- 4) 数字（白色 + 深色投影，压在线上）----
-        text = f"{int(bpm):03d}" if bpm else "---"
+        text = f"{int(bpm):03d}" if bpm and self.live else "---"
         digit_col = color_of_intensity(self.p_smooth) if self.live else ACCENT['dim']
         if self.fully_red:                                      # 满红：压深
             digit_col = mix_color(digit_col, '#c1130c', 0.55)
@@ -770,8 +901,7 @@ class HeartHud:
         global LOCKED_BASE
         now = time.time()
         st = self.state
-        if st.get("base") is not None:
-            LOCKED_BASE = float(st["base"])     # 服务端锁定后基准不再漂移
+        LOCKED_BASE = float(st["base"]) if st.get("base") is not None else None
         stats = st.get("stats") or {}
         recent = st.get("recent") or {}
         age = st.get("age")
@@ -823,35 +953,54 @@ class HeartHud:
         self.burst = max(0.0, self.burst - dt * 1.1)
 
     def _tick(self) -> None:
+        if self.stop_requested.is_set():
+            self._quit()
+            return
         now = time.time()
         dt = min(0.2, now - self.last_tick)
         self.last_tick = now
-        # 服务端皮肤变了（网页/控制台改的）→ 重启自己跟上；刚启动 2 秒内不查，避免竞态
-        if (getattr(self, 'follow_remote_skin', True)
-                and now - self.started > 2.0 and now - self.last_skin_check > 2.0):
-            self.last_skin_check = now
-            before = SKIN_NAME
-            load_remote_params(self.base)
-            if SKIN_NAME != before:
-                log_skin_change(before, SKIN_NAME)
-                self._restart_with_skin(SKIN_NAME)
-                return
+        global SKIN_NAME
+        while not self.commands.empty():
+            command=self.commands.get()
+            if type(command.get('edit')) is bool:self.resize_mode=command['edit']
+        self.state = self.stream.latest()
+        self._receive_size_result()
+        incoming = self.state.get("params")
+        if incoming:
+            P.update(incoming)
+            remote_size = tuple(incoming.get(key) for key in ('hudWidth','hudHeight'))
+            acknowledged = self.size_ack_version and self.state.get('params_version',0)>=self.size_ack_version
+            if not self.resize_drag and self.local_size and (remote_size==self.local_size or acknowledged):
+                self.local_size = None
+                self.size_ack_version = None
+                self.size_error = ''
+        if self.follow_remote_skin and self.state.get("skin") in ("fish", "ghost", "xianyu"):
+            SKIN_NAME = self.state["skin"]
+        self.history = (self.state.get("history") or {}).get("samples", [])
+        self._sync_layout()
         bpm = self.state.get("bpm")
         self._update_algo(bpm, dt)
         self.phase = (self.phase + ((bpm / 60.0) if (self.live and bpm) else 0.15) * dt) % 1.0
         self._draw()
+        self._draw_resize_controls()
         self.root.after(40, self._tick)
 
     def run(self) -> None:
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        finally:
+            self.size_worker_stop.set()
+            self.stream.close()
+            self.stream.wait_closed(.5)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Minimal transparent HUD for the heart-rate bridge")
+    parser.add_argument("--managed",action="store_true",help="由总控持有进程与退出管道")
     parser.add_argument("--api", default="http://127.0.0.1:8080/hr")
     parser.add_argument("--scale", type=int, default=3, choices=[2, 3, 4, 5])
     parser.add_argument("--opaque", action="store_true", help="不透明背景（调试/兼容）")
-    parser.add_argument("--skin", default=None, choices=["fish", "ghost"],
+    parser.add_argument("--skin", default=None, choices=["fish", "ghost", "xianyu"],
                         help="皮肤：fish（咸鱼）/ ghost（幽灵）；缺省则跟随服务端 /params")
     parser.add_argument("--no-skin-watch", action="store_true",
                         help="不跟随服务端皮肤变化（重启自身时用，避免重启循环）")
@@ -859,8 +1008,20 @@ def main() -> None:
     if args.skin:
         global SKIN_NAME
         SKIN_NAME = args.skin
-    HeartHud(args.api, args.scale, opaque=args.opaque,
-             watch_skin=not args.no_skin_watch).run()
+    hud=HeartHud(args.api,args.scale,opaque=args.opaque,
+                 watch_skin=not args.no_skin_watch and args.skin is None)
+    if args.managed:
+        def watch_stop():
+            try:
+                for line in sys.stdin:
+                    if line.strip()=="stop": break
+                    try:
+                        command=json.loads(line)
+                        if isinstance(command,dict):hud.commands.put(command)
+                    except (ValueError,TypeError):pass
+            finally: hud.stop_requested.set()  # owner exit/EOF also cleans the HUD
+        threading.Thread(target=watch_stop,daemon=True).start()
+    hud.run()
 
 
 if __name__ == "__main__":

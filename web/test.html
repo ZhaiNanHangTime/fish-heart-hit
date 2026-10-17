@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>fish-heart-hit · 心率动画验收台</title>
 <style>
   :root{
@@ -57,8 +58,9 @@
   .grid3 .cell b{font-size:11px;color:var(--dim);display:block;margin-bottom:4px;font-weight:600}
   .grid3 iframe{width:100%;height:150px}
 </style>
+<link rel="stylesheet" href="/studio-theme.css">
 </head>
-<body>
+<body class="studio-tool">
 <header>
   <h1>心率动画验收台</h1>
   <span class="tag">精确驱动心率 → 看动画怎么反应</span>
@@ -137,17 +139,17 @@ const frames = [];
 const $ = id => document.getElementById(id);
 
 // ---- 阈值：用 /params 里的真实参数算，保证与页面一致 ----
-let P = { minGap:22, maxGap:30, p90Offset:3, warn:120, danger:150 };
-let TH = { B:65, burstLow:80, red:87, warn:120, danger:150 };
+let P = { minGap:22, maxGap:30, p90Offset:3, warn:90, danger:100 };
+let TH = { B:65, burstLow:80, red:87, warn:90, danger:100 };
 function recomputeThresholds(){
-  const B = P.base || 65;
+  const B = Number($('base').value) || 65;
   TH = {
     B,
     ping: Math.round(B + (P.minGap||22) * 0.45),
-    burstLow: B + (P.minGap||22),
+    burstLow: B + (P.burstAbove??10),
     red: B + (P.minGap||22),
-    warn: P.warn || 120,
-    danger: P.danger || 150,
+    warn: P.warn || 90,
+    danger: P.danger || 100,
   };
   $('thrTag').textContent = `基准 B≈${TH.B}　burst 门槛≈${TH.burstLow}　满红≈${TH.red}　warn ${TH.warn} / danger ${TH.danger}`;
   $('mLo').textContent = `B ${B}`;
@@ -234,7 +236,7 @@ function onState(m){
 }
 window.addEventListener('message', ev => {
   const m = ev.data;
-  if(m && m.type === 'state') onState(m);
+  if(ev.origin===location.origin && ev.source===iframe.contentWindow && m && m.type === 'state') onState(m);
 });
 function renderLog(){
   const tb = $('logBody');
@@ -289,6 +291,7 @@ $('copyLog').onclick = () => {
   navigator.clipboard.writeText(txt).then(()=>alert('已复制 '+LOG.length+' 行'),()=>alert('复制失败，请手动全选'));
 };
 document.addEventListener('keydown', e => {
+  if(e.target.closest('input,textarea,select,[contenteditable]'))return;
   if(e.code === 'Space'){ e.preventDefault(); $('pause').click(); }
   if(e.key === 'r' || e.key === 'R'){ manual(B); $('hr').value = B; $('hrNum').value = B; }
 });
@@ -301,7 +304,7 @@ skinSel.onchange = () => { iframe.src = `/?bg=1&test=1&skin=${skinSel.value}`; }
 const hdr = document.querySelector('header');
 hdr.insertBefore(skinSel, hdr.querySelector('span[style*="flex"]'));
 
-iframe.addEventListener('load', () => { recomputeThresholds(); pushHR(); });
+iframe.addEventListener('load', () => { recomputeThresholds();send({type:'lock',bpm:Number($('base').value)||null}); pushHR(); });
 requestAnimationFrame(tick);
 </script>
 </body>

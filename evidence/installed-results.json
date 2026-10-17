@@ -1,0 +1,37 @@
+{
+  "verified_at": "2026-10-16T08:02:26.849Z",
+  "target": "G:\\downloads\\heart-rate",
+  "health": {
+    "app": "fish-heart-hit",
+    "control_protocol": 2,
+    "root_id": "b3f12de98bb1fc0d",
+    "connected": true
+  },
+  "root_matches": true,
+  "hud_at_check": true,
+  "total_control_title": "咸鱼突刺 · 总控",
+  "visible": true,
+  "effects_redirect": true,
+  "frames_manifest_status": 200,
+  "new_png_hashes_verified": 8,
+  "shared_anchor": [
+    288,
+    224
+  ],
+  "baked_effects": true,
+  "desktop_size": [
+    240,
+    104
+  ],
+  "obs_size": [
+    520,
+    170
+  ],
+  "desktop_preview_draft_isolated": true,
+  "trace_layout_choices": 2,
+  "saved_layout": "overlay",
+  "preview_switch_and_discard": true,
+  "page_errors": [],
+  "real_device_connected_at_check": true,
+  "configuration_writes": 0
+}

@@ -1,0 +1,10 @@
+{
+  "frozen_updateAlgo": "IDENTICAL",
+  "ghost_five_methods": "AST_IDENTICAL",
+  "eight_pngs": "IDENTICAL_TO_USER_ZIP",
+  "legacy_unused_preview": "UNCHANGED",
+  "batch_files_GBK_936_CRLF": 7,
+  "VBS": "UTF16",
+  "pixel_inline_scripts": 2,
+  "requirements": "UNCHANGED"
+}

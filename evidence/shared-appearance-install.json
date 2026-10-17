@@ -1,0 +1,35 @@
+{
+  "installed": true,
+  "target": "G:\\downloads\\heart-rate",
+  "backup": "G:\\downloads\\heart-rate-backups\\before-shared-appearance-20261016-160147",
+  "changed_code_files": 5,
+  "private_files_verified": 36,
+  "private_hashes_match": true,
+  "graceful_restart": true,
+  "oneclick_entry_invoked": true,
+  "default_hud_size": [
+    240,
+    104
+  ],
+  "verified": true,
+  "shared_character_scale_range": [
+    0.5,
+    4
+  ],
+  "hud_width_range": [
+    160,
+    1920
+  ],
+  "hud_height_range": [
+    64,
+    1080
+  ],
+  "device_connected_at_check": true,
+  "process_counts": {
+    "service_processes": 1,
+    "managed_hud_processes": 1,
+    "total_control_windows": 1,
+    "window_count_method": "exact title plus Chrome/Edge process image, EnumWindows"
+  },
+  "installed_check_configuration_writes": 0
+}

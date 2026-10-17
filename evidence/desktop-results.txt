@@ -1,0 +1,5 @@
+Tk HUD scale 2: 3 skins, 8 material frames, size .5/1/1.3/2/4, both trace layouts switch in the same window; trace stays behind character/digits; preserved ghost quantization
+Tk HUD scale 3: 3 skins, 8 material frames, size .5/1/1.3/2/4, both trace layouts switch in the same window; trace stays behind character/digits; preserved ghost quantization
+Tk HUD scale 4: 3 skins, 8 material frames, size .5/1/1.3/2/4, both trace layouts switch in the same window; trace stays behind character/digits; preserved ghost quantization
+Tk HUD scale 5: 3 skins, 8 material frames, size .5/1/1.3/2/4, both trace layouts switch in the same window; trace stays behind character/digits; preserved ghost quantization
+Legacy GUI entry delegates to the unified launcher; it creates no separate Tk console

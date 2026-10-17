@@ -68,8 +68,9 @@
 
   @media (max-width: 880px) { .groups { grid-template-columns: 1fr; } .scope { height: 320px; } }
 </style>
+<link rel="stylesheet" href="/studio-theme.css">
 </head>
-<body>
+<body class="studio-tool">
 
 <div class="bar">
   <h1><b>🐟</b> 参数调校</h1>
@@ -125,11 +126,12 @@
   </div>
 
   <p class="hint" style="margin-top:18px">
-    改完点「保存到服务端」→ 网页和悬浮窗下次启动自动读取。
+    改完点「保存到服务端」→ 网页和悬浮窗立即接收同一配置版本。
     「复制参数」拿到的 <b>?minGap=22&amp;...</b> 贴到浏览器源地址后面也可以（URL 优先级最高）。
   </p>
 </main>
 
+<script src="/live.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const cv = $('wave'), ctx = cv.getContext('2d');
@@ -137,9 +139,11 @@ const cv = $('wave'), ctx = cv.getContext('2d');
 const DEFAULTS = {
   minGap: 22, maxGap: 30, p90Offset: 3, yellowAt: 0.4, orangeAt: 0.7, anchorTau: 15,
   attack: 2, release: 6, redHold: 2, redDrop: 5, offlineAfter: 5,
-  burstRise: 10, burstAbove: 15, burstWindow: 30, burstCooldown: 30,
+  burstRise: 8, burstAbove: 10, burstWindow: 30, burstCooldown: 30, warn:90, danger:100,
 };
 let cur = Object.assign({}, DEFAULTS);
+const changed = new Set();
+let version = null;
 let hr = {}, hist = [], dragKey = null;
 
 const GROUPS = [
@@ -153,6 +157,8 @@ const GROUPS = [
     ['release',      '褪色时间(秒)',   1, 20, 0.5, '调大 → 褪得慢，不会一闪一闪'],
     ['redHold',      '满红迟滞(秒)',   0, 6, 0.5, '连续达阈值多久才算满红'],
     ['redDrop',      '解除回落(bpm)',  0, 20, 1, '回落多少解除满红'],
+    ['warn', '提示阈值(bpm)', 40, 140, 1, '仅提示，不参与咸鱼分档；非医疗警报'],
+    ['danger', '高强度提示(bpm)', 50, 160, 1, '仅提示，不参与咸鱼分档；非医疗警报'],
     ['offlineAfter', '离线判定(秒)',   2, 30, 1, '超过这么久没数据就显示 ---'],
   ]],
   ['g3', [
@@ -177,7 +183,7 @@ function renderGroups() {
 }
 
 function setVal(k, v) {
-  cur[k] = parseFloat(v);
+  cur[k] = parseFloat(v); changed.add(k);
   $('v_' + k).textContent = cur[k];
   push();
 }
@@ -185,9 +191,6 @@ function setVal(k, v) {
 function anchors() {
   const s = hr.stats || {}, rc = hr.recent || {};
   let B = hr.base;
-  if (B == null && (s.samples || 0) >= 40 && s.min != null && s.avg != null) {
-    B = Math.max(45, s.min + (s.avg - s.min) * 0.25);
-  }
   if (B == null) B = 70;
   const p90 = rc.p90 != null ? rc.p90 : B + cur.minGap;
   const R = Math.min(B + cur.maxGap, Math.max(B + cur.minGap, p90 - cur.p90Offset));
@@ -300,6 +303,7 @@ function moveDrag(e) {
   // 同步到滑杆（如果有对应的）
   const sl = $('s_' + dragKey);
   if (sl) { sl.value = cur[dragKey]; $('v_' + dragKey).textContent = cur[dragKey]; }
+  changed.add(dragKey);
   push(); draw();
 }
 
@@ -319,19 +323,22 @@ function push() {
 }
 
 async function refresh() {
-  try {
-    const [h, hs] = await Promise.all([
-      (await fetch('/hr')).json(),
-      (await fetch('/history')).json(),
-    ]);
-    hr = h;
-    hist = (hs.samples || []).map((d) => [d[0], d[1]]);
-    if (!hist.length || !$('live').checked) hist = simulate();
-  } catch (_) {
-    hist = simulate();
-  }
+  if (!hist.length || !$('live').checked) hist = simulate();
   draw();
 }
+HRLive.subscribe(snap=>{
+  hr=snap;hist=(snap.history?.samples||[]);
+  if(snap.params && version!==snap.params_version) {
+    version=snap.params_version;
+    for(const k of Object.keys(cur)) if(!changed.has(k) && k in snap.params)cur[k]=snap.params[k];
+    if(snap.params.skin)$('skinSel').value=snap.params.skin;
+    renderGroups();
+  }
+  refresh();
+});
+fetch('/params/schema').then(r=>r.json()).then(s=>{
+  for(const k of Object.keys(DEFAULTS))if(k in s.defaults)DEFAULTS[k]=s.defaults[k];
+}).catch(()=>{});
 
 // 没有真实数据时造一段像样的模拟波形，至少让把手能调
 function simulate() {
@@ -347,18 +354,21 @@ function simulate() {
 
 async function saveParams() {
   try {
-    const saved = await (await fetch('/params', {
+    const response = await fetch('/params', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cur),
-    })).json();
+      body: JSON.stringify(Object.fromEntries([...changed].map(k=>[k,cur[k]]))),
+    });
+    const saved=await response.json();
+    if(!response.ok)throw Error(saved.error||'保存失败');
+    changed.clear();
     $('saveTip').textContent = '已保存 ✓';
     setTimeout(() => { $('saveTip').textContent = ''; }, 3500);
     Object.keys(saved || {}).forEach((k) => { if (k in cur) cur[k] = saved[k]; });
   } catch (e) { alert('保存失败：' + e); }
 }
 
-function resetAll() { cur = Object.assign({}, DEFAULTS); renderGroups(); push(); draw(); }
+function resetAll() { cur = Object.assign({}, DEFAULTS);Object.keys(cur).forEach(k=>changed.add(k)); renderGroups(); push(); draw(); }
 
 function copyParams() {
   const q = Object.keys(cur).map((k) => `${k}=${cur[k]}`).join('&');
@@ -382,7 +392,7 @@ async function setSkin() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ skin: v }),
     });
-    $('saveTip').textContent = '皮肤已保存 ✓ 刷新直播页生效';
+    $('saveTip').textContent = '皮肤已保存并广播 ✓';
     setTimeout(() => { $('saveTip').textContent = ''; }, 3000);
   } catch (e) { alert('保存失败：' + e); }
 }

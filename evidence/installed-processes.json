@@ -1,0 +1,6 @@
+{
+  "service_processes": 1,
+  "managed_hud_processes": 1,
+  "total_control_windows": 1,
+  "window_count_method": "exact title plus Chrome/Edge process image, EnumWindows"
+}

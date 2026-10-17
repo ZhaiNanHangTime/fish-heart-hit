@@ -1,0 +1,11 @@
+{
+  "verification": "read-only installed HTTP and process checks; no live UI click automation",
+  "health_identity_matches": true,
+  "navigation_and_feedback_served": true,
+  "session_recovery_served": true,
+  "hud_alive": true,
+  "fish_width_150_preserved": true,
+  "device_connected_at_check": true,
+  "fresh_heart_rate_at_check": true,
+  "configuration_writes": 0
+}

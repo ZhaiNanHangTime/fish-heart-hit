@@ -1,0 +1,102 @@
+{
+  "canvas": [
+    576,
+    384
+  ],
+  "anchor": [
+    288,
+    224
+  ],
+  "baked_effects": true,
+  "source_zip_sha256": "3c447726286be5f068c1bbb2a29dff9a0d87f9f772667e6af03350eb9eea4932",
+  "frames": {
+    "idle": {
+      "size": [
+        576,
+        384
+      ],
+      "anchor": [
+        288,
+        224
+      ],
+      "sha256": "8494b426a690ef0db25152211738ea08dc7c7c8069edcbb27842960ea3acd1a7"
+    },
+    "alert_low": {
+      "size": [
+        576,
+        384
+      ],
+      "anchor": [
+        288,
+        224
+      ],
+      "sha256": "cecd2db34ce4491e8a557707b4b3c8bb09da9e8eb59027fa1b4599cb16d799ad"
+    },
+    "alert_mid": {
+      "size": [
+        576,
+        384
+      ],
+      "anchor": [
+        288,
+        224
+      ],
+      "sha256": "8e622fe0f8e0a7f3fce61a232a9104fa4c1d226b7fdf109ca46b29b8ac85803a"
+    },
+    "tense": {
+      "size": [
+        576,
+        384
+      ],
+      "anchor": [
+        288,
+        224
+      ],
+      "sha256": "da00c4cfaff569ac5756c4ecaf97d77990daec887d3f070ca355a992745ab777"
+    },
+    "high": {
+      "size": [
+        576,
+        384
+      ],
+      "anchor": [
+        288,
+        224
+      ],
+      "sha256": "ccb8afbd77584688fb8017e8472437bec8d0d7aefe20921b023cff95dd5712f1"
+    },
+    "charge": {
+      "size": [
+        576,
+        384
+      ],
+      "anchor": [
+        288,
+        224
+      ],
+      "sha256": "e1e400bf0ffa7f506ca93bc1c2f2ac5c745fe8e6f7c70e5dece148dad99eff29"
+    },
+    "burst": {
+      "size": [
+        576,
+        384
+      ],
+      "anchor": [
+        288,
+        224
+      ],
+      "sha256": "83c0c9813e0ab97b80600231063b347ac4811cdb7c49d780269a99a1c751e452"
+    },
+    "recover": {
+      "size": [
+        576,
+        384
+      ],
+      "anchor": [
+        288,
+        224
+      ],
+      "sha256": "b22e4dad98ee2daf2a6d3093230b70df3f9f692401616f994c6690c7f9a4518d"
+    }
+  }
+}

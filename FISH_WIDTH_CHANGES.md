@@ -1,0 +1,24 @@
+# 素材宽窄功能改动文件
+
+- `BUG_AUDIT.md`
+- `CHANGELOG.md`
+- `evidence/fish-width-75.png`
+- `evidence/fish-width-install.json`
+- `evidence/installed-visual-http.json`
+- `evidence/native-visual-parity.json`
+- `evidence/unittest.txt`
+- `evidence/visual-parity-results.json`
+- `heartrate_hud.py`
+- `heartrate_live.py`
+- `hr_config.py`
+- `hr_visual.py`
+- `INSTALL_REPORT.md`
+- `README.md`
+- `tests/check_visual_parity.cjs`
+- `tests/check_visual_parity.py`
+- `tests/README.md`
+- `tests/test_visual.py`
+- `VERIFICATION.md`
+- `web/console.html`
+- `web/control.js`
+- `web/pixel.html`

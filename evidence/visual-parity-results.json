@@ -1,0 +1,11 @@
+{
+  "cases": 108,
+  "layout": "exactly identical",
+  "native_image_vs_browser_canvas": "all RGBA SHA256 match",
+  "fish_width_preview_save_reset_and_obs_sync": true,
+  "fish_width_keeps_height_and_digits": true,
+  "preview_zoom_and_dimensions": true,
+  "visual_native_border_controls": true,
+  "advanced_settings_keep_preview_visible": true,
+  "page_errors": []
+}

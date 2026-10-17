@@ -1,0 +1,15 @@
+{
+  "installed": true,
+  "target": "G:\\downloads\\heart-rate",
+  "backup": "G:\\downloads\\heart-rate-backups\\before-layout-choice-20261016-140347",
+  "changed_code_files": 6,
+  "private_files_verified": 33,
+  "private_hashes_match": true,
+  "graceful_restart": true,
+  "oneclick_entry_invoked": true,
+  "configured_default": "overlay",
+  "verified": true,
+  "saved_layout_at_check": "overlay",
+  "device_connected_at_check": true,
+  "hud_at_check": true
+}

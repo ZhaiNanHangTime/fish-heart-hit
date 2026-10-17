@@ -10,6 +10,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<script src="/live.js"></script>
 <script>
 /* 极简版：一个大号像素心率数字 + 一颗跟着跳的心，透明背景 */
 
@@ -50,9 +51,7 @@ function pixelText(x,y,t,d,c){
 }
 
 let state = { bpm:null, zone:'idle' };
-const es = new EventSource('/events');
-es.onmessage = e => { try { state = JSON.parse(e.data); } catch(_){} };
-es.onerror = () => { state.bpm = null; };
+HRLive.subscribe(snap => {state = snap.connected ? snap : {...snap,bpm:null,zone:'idle'};});
 
 let phase = 0, last = performance.now();
 

@@ -1,0 +1,22 @@
+{
+  "target": "G:\\downloads\\heart-rate",
+  "verification": "HTTP/code/resource read only; no browser UI automation",
+  "health_identity_matches": true,
+  "hud_alive": true,
+  "device_connected_at_check": false,
+  "fresh_heart_rate_at_check": false,
+  "visual_console_controls_served": true,
+  "one_apply_submits_all_current_drafts": true,
+  "shared_layout_matches_native_function": true,
+  "exact_sprite_bytes_match": true,
+  "original_png_hashes_verified": 8,
+  "desktop_size": [
+    381,
+    95
+  ],
+  "skin": "xianyu",
+  "fishScale": 1.35,
+  "configuration_writes": 0,
+  "current_window_ui_verified": false,
+  "obs_recording_verified": false
+}

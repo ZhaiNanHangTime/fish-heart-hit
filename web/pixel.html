@@ -12,7 +12,7 @@
 <canvas id="c"></canvas>
 <script>
 /* =========================================================
-   咸鱼突刺 · 心率（极简透明版）
+   fish-heart-hit · 八状态角色 / 绝对分档 / SSE 配置同步
    只有三样东西：红色心率线（横穿画面中央）、像素咸鱼、心率数字；爆发时增加突刺反馈
    没有背景框、没有统计、没有电量 —— 方便直接叠在游戏画面上
    ========================================================= */
@@ -46,12 +46,15 @@ let W = 0, H = 0, dpr = 1;
 
 const params = new URLSearchParams(location.search);
 const SCALE = parseFloat(params.get('s') || '1');
+const PREVIEW = params.get('preview') === '1';
+const HUD_PREVIEW = params.get('hudPreview') === '1' && (PREVIEW || params.get('demo') === '1');
+let previewDraft = null;
 const PREVIEW_BG = params.get('bg') === '1';   // 预览用：铺一层深色底（方便在浅色页面上看效果）
 
 function fitCanvas() {
   const rect = canvas.getBoundingClientRect();
-  W = Math.max(160, rect.width);
-  H = Math.max(60, rect.height);
+  W = Math.max(160, Math.round(rect.width));
+  H = Math.max(60, Math.round(rect.height));
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.round(W * dpr);
   canvas.height = Math.round(H * dpr);
@@ -78,13 +81,13 @@ function mixColor(c1, c2, k) {
    冻结版算法（之后只做参数校准，不再改结构）
 
    ┌ 颜色映射：个人基线 B ＋ 最近 10 分钟 P90 动态阈值
-   ├ 防假红 ：R ≥ B + 30
-   ├ 防抗红 ：R ≤ B + 45
+   ├ 防假红 ：R ≥ B + 22
+   ├ 防抗红 ：R ≤ B + 30
    ├ 慢更新 ：阈值按 15 秒时间常数缓慢跟随
    ├ 视觉   ：强度做 Attack(2s) / Release(6s)
    ├ 迟滞   ：连续 ≥ R 两秒才算满红，回落到 R−5 以下解除
    ├ 离线   ：超过 5 秒没有新数据 → 显示离线，不沿用旧心率
-   └ 特效   ：30 秒内上涨 ≥10 bpm 且高于 B+15 → 触发一次，冷却 30 秒
+   └ 特效   ：30 秒内上涨 ≥8 bpm 且高于 B+10 → 触发一次，冷却 30 秒
 
    数据本身不做任何滤波（手表读数可靠），只有"画面"做缓动。
    ========================================================= */
@@ -102,55 +105,60 @@ const P = {
   redHold: 2.0,       // 连续达阈值多久算满红
   redDrop: 5,         // 回落多少解除满红
   offlineAfter: 5,    // 多久没数据算离线
-  burstRise: 10,      // 窗口内涨多少触发特效
-  burstAbove: 15,     // 且要高于基线多少
+  burstRise: 8,      // 窗口内涨多少触发特效
+  burstAbove: 10,     // 且要高于基线多少
   burstWindow: 30,    // 涨幅观察窗口（秒）
   burstCooldown: 30,  // 特效冷却（秒）
+  fishScale: 1.0,     // 仅新皮肤的角色大小，网页控制台可调整
+  fishWidth: 1.5,     // 用户选定的默认素材横向比例；不改变窗口和数字
+  fxWarmth: true, fxKick: true,
+  traceLayout: 'overlay',
 };
 
 /* 调参入口：URL 参数覆盖 + 来自调校面板的 postMessage（改完即时生效，不用刷新）
    例如  /?minGap=22&burstRise=8                                     */
 const TUNABLE = ['minGap', 'maxGap', 'p90Offset', 'yellowAt', 'orangeAt', 'anchorTau',
                  'attack', 'release', 'redHold', 'redDrop', 'offlineAfter', 'burstRise',
-                 'burstAbove', 'burstWindow', 'burstCooldown'];
+                 'burstAbove', 'burstWindow', 'burstCooldown', 'fishScale', 'fishWidth'];
 function applyUrlParams() {
   TUNABLE.forEach(k => {
     const v = parseFloat(params.get(k));
     if (!isNaN(v)) P[k] = v;
   });
   const sk = params.get('skin');           // 皮肤是字符串，单独处理
-  if (sk) P.skin = sk;
-}
-P.skin = 'fish';
-applyUrlParams();
-
-// 启动时读服务端保存的参数（/tune 里点过"保存"就生效）；URL 参数优先级最高
-fetch('/params').then(r => r.json()).then(p => {
-  if (p && typeof p === 'object') {
-    Object.keys(p).forEach(k => { if (TUNABLE.includes(k)) P[k] = p[k]; });
-    if (p.skin && !params.get('skin')) P.skin = p.skin;   // 皮肤：URL 优先于服务端
+  if (sk && SKINS_ALLOWED.includes(sk)) P.skin = sk;
+  const layout = params.get('traceLayout');
+  if (['overlay','lower'].includes(layout)) P.traceLayout = layout;
+  for (const [key, name] of [['fxWarmth','warmth'],['fxKick','kick']]) {
+    if (params.has(key)) XIANYU_FX[name] = !['0','false'].includes(params.get(key));
   }
+}
+const SKINS_ALLOWED = ['fish','ghost','xianyu'];
+P.skin = 'fish';
+
+// Snapshots are authoritative; explicit URL overrides remain highest priority.
+function receiveParams(p) {
+  if (!p || typeof p !== 'object') return;
+  if (typeof state !== 'undefined') { if(p.warn!=null)state.warn=p.warn;if(p.danger!=null)state.danger=p.danger; }
+  for (const key of TUNABLE) if (Number.isFinite(p[key])) P[key] = p[key];
+  if (SKINS_ALLOWED.includes(p.skin)) P.skin = p.skin;
+  if (['overlay','lower'].includes(p.traceLayout)) P.traceLayout = p.traceLayout;
+  if (typeof p.fxWarmth === 'boolean') XIANYU_FX.warmth = p.fxWarmth;
+  if (typeof p.fxKick === 'boolean') XIANYU_FX.kick = p.fxKick;
   applyUrlParams();
-}).catch(() => {});
+}
 window.addEventListener('message', ev => {
-  const msg = ev.data;
-  if (msg && msg.type === 'params' && msg.params) {
-    Object.keys(msg.params).forEach(k => {
-      const v = parseFloat(msg.params[k]);
-      if (TUNABLE.includes(k) && !isNaN(v)) P[k] = v;
-    });
+  if (ev.origin !== location.origin || ev.source !== parent) return;
+  if (ev.data?.type === 'params') {
+    if(PREVIEW) previewDraft={...ev.data.params};
+    receiveParams(ev.data.params);
   }
 });
 
-let lockedBase = null;   // 服务端在开播头 3 分钟锁定后下发的基准，锁定后不再漂移
+let lockedBase = null;   // latest server baseline; P25 follows with tau=60s
 
 function baseHeart(stats) {
   if (lockedBase != null) return lockedBase;
-  const s = stats || {};
-  if ((s.samples || 0) >= 40 && s.min != null && s.avg != null) {
-    // 锁定前的临时估计：落在「本场最低」与「本场平均」之间偏平静的一侧（1/4 处）
-    return Math.max(45, s.min + (s.avg - s.min) * 0.25);
-  }
   return P.baseFallback;
 }
 
@@ -295,20 +303,27 @@ function drawTrace(samples, centerY, amp) {
 const SKIN_DEFS = {
   fish:   { w: 18, h: 13 },
   ghost:  { w: 14, h: 14 },
-  xianyu: { w: 30, h: 13 },  // 按最宽突刺帧预留，不挤压图片
+  xianyu: { w: 24, h: 16 }, // reserve the widest material frame
 };
 
-const XIANYU_FRAMES = ['idle', 'alert_low', 'alert_mid', 'tense', 'high', 'charge', 'burst', 'recover'];
-const XIANYU_IMAGES = (() => {
-  const base = '/assets/skins/xianyu/';
-  const map = {};
-  XIANYU_FRAMES.forEach(name => {
-    const img = new Image();
-    img.src = base + name + '.png';
-    map[name] = img;
+const XIANYU_IMAGES = {};
+const XIANYU_SPRITES = {};
+let spriteError = '';
+let xianyuBakedEffects = false;
+fetch('/assets/skins/xianyu/frames.json').then(r=>{if(!r.ok)throw Error('皮肤配置未加载');return r.json()}).then(meta=>{
+  xianyuBakedEffects = meta.baked_effects === true;
+  Object.entries(meta.frames).forEach(([name,def])=>{
+    const img=new Image();XIANYU_IMAGES[name]=img;
+    img.onload=()=>{
+      const sprite=document.createElement('canvas');
+      [sprite.width,sprite.height]=meta.canvas;
+      sprite.getContext('2d').drawImage(img,meta.anchor[0]-def.anchor[0],meta.anchor[1]-def.anchor[1]);
+      XIANYU_SPRITES[name]=sprite;
+    };
+    img.onerror=()=>{spriteError='皮肤素材加载失败：'+name};
+    img.src='/assets/skins/xianyu/'+name+'.png';
   });
-  return map;
-})();
+}).catch(e=>{spriteError=e.message});
 
 /* ---------- 幽灵：白色圆顶 + 黑描边 + 红舌头 + 三瓣波浪底 ---------- */
 const GHOST_ROWS = [
@@ -373,23 +388,25 @@ function drawGhost(ox, oy, unit, opts) {
 
 /* 按当前皮肤分发 */
 function drawCharacter(x, y, unit, opts) {
-  if (P.skin === 'ghost') return drawGhost(x, y, unit, opts);
+  if (P.skin === 'ghost') return drawGhost(x, y, unit*(opts.scale ?? P.fishScale), opts);
   if (P.skin === 'xianyu') return drawXianyu(x, y, unit, opts);
-  return drawFish(x, y, unit, opts);
+  return drawFish(x, y, unit*(opts.scale ?? P.fishScale), opts);
 }
 
 const FISH_W = 18, FISH_H = 13;
 const CGX = 7.2, CGY = 6.4, RX = 6.6, RY = 4.6;
 
-// 咸鱼突刺皮肤：图片负责姿态分层，代码只负责红温染色与心跳弹动。
-const XIANYU_FX = { warmth: true, kick: true };
+// 咸鱼突刺皮肤的表现层；保留现有 BPM / P90 / burst 算法与全部原皮肤。
+const XIANYU_FX = { warmth: true, kick: true }; // 已移除红色脉冲光
 const XIANYU_TINT = document.createElement('canvas');
 const XIANYU_TINT_CTX = XIANYU_TINT.getContext('2d');
 let lastXianyuFrame = 'idle';
+let lastSpriteGeometry=null;
 const clamp01 = n => Math.min(1, Math.max(0, n));
 const smooth01 = n => { const x = clamp01(n); return x * x * (3 - 2 * x); };
 
 // 每个心跳周期一次：迅速上弹，约半个周期内缓慢回位。
+// 相位仍取自 bpm / 60，未修改真正的心率采样与平滑算法。
 function xianyuBeatKick(beat) {
   const p = ((beat % 1) + 1) % 1;
   if (p < 0.12) return 1 - Math.pow(1 - p / 0.12, 3);
@@ -397,63 +414,55 @@ function xianyuBeatKick(beat) {
   return 0;
 }
 
-function pickXianyuFrame({ sleeping, flush = 0, burst = 0 }) {
-  if (sleeping) return 'idle';
-  if (burst > 0.42) return 'burst';
-  if (burst > 0.08) return 'recover';
-  if (flush >= 0.84) return 'charge';
-  if (flush >= 0.68) return 'high';
-  if (flush >= 0.52) return 'tense';
-  if (flush >= 0.34) return 'alert_mid';
-  if (flush >= 0.18) return 'alert_low';
-  return 'idle';
+// Absolute bpm difference; the Schmitt band is independent of the moving R anchor.
+const XIANYU_STAGES = ['idle','alert_low','alert_mid','tense','high','charge'];
+const STAGE_BOUNDS = [4,8,12,16,20];
+let xianyuStageIndex = 0;
+let demoForcedStage = null;
+let demoForcedFrame = null;
+function xianyuStage(delta, sleeping=false) {
+  if (sleeping || !Number.isFinite(delta)) { xianyuStageIndex = 0; return 'idle'; }
+  while (xianyuStageIndex < 5 && delta >= STAGE_BOUNDS[xianyuStageIndex] + 2) xianyuStageIndex++;
+  while (xianyuStageIndex > 0 && delta < STAGE_BOUNDS[xianyuStageIndex-1] - 2) xianyuStageIndex--;
+  return XIANYU_STAGES[xianyuStageIndex];
 }
-
-function xianyuLoaded(name) {
-  const image = XIANYU_IMAGES[name];
-  return image && image.complete && image.naturalWidth > 0 ? image : null;
-}
-
 function drawXianyu(ox, oy, unit, opts) {
-  const { beat, sleeping, flush = 0, burst = 0 } = opts;
-  const frame = pickXianyuFrame({ sleeping, flush, burst });
+  const {beat, sleeping, flush = 0, burst = 0} = opts;
+  // 突刺独立于常态：先 thrust，后 recover；结束后恢复当前心率档位。
+  let frame = !DEMO && !TEST_MODE && Number.isInteger(state.visual_stage)
+    ? XIANYU_STAGES[state.visual_stage] : xianyuStage(opts.bpm - (algo.anchors?.B ?? P.baseFallback), sleeping);
+  if(sleeping)frame='idle';
+  if (DEMO_CONTROLLED && demoForcedStage !== null) frame = XIANYU_STAGES[demoForcedStage];
+  if(DEMO_CONTROLLED && demoForcedFrame && !sleeping) frame=demoForcedFrame;
+  else if (!sleeping && burst > 0.30) frame = 'burst';
+  else if (!sleeping && burst > 0.08) frame = 'recover';
   lastXianyuFrame = frame;
-  const img = xianyuLoaded(frame)
-    || xianyuLoaded('idle') || xianyuLoaded('alert_low') || xianyuLoaded('alert_mid')
-    || xianyuLoaded('tense') || xianyuLoaded('high') || xianyuLoaded('charge')
-    || xianyuLoaded('burst') || xianyuLoaded('recover');
+  // One shared virtual canvas/body anchor for every frame. Never scale with beat/burst.
+  const scaled=scaledSpriteSet.images[frame];
+  const exact=opts.rect&&scaled?.complete&&scaled.naturalWidth===opts.rect[2]&&scaled.naturalHeight===opts.rect[3];
+  const img = exact ? scaled : XIANYU_SPRITES[frame] || XIANYU_SPRITES.idle;
   if (!img) return;
-
-  const h = Math.round(SKIN_DEFS.xianyu.h * unit);
-  const w = Math.round(h * img.naturalWidth / img.naturalHeight);
-  const heat = sleeping ? 0 : smooth01((flush - 0.22) / 0.72);
-  const kick = sleeping ? 0 : xianyuBeatKick(beat);
-  const softBob = Math.sin(beat * Math.PI * 2) * unit * (sleeping ? 0.18 : 0.28 + 0.18 * flush);
-  const kickBlend = XIANYU_FX.kick ? smooth01((flush - 0.22) / 0.58) : 0;
-  const punchBob = -kick * unit * (0.48 + 0.48 * heat);
-  const bob = softBob * (1 - kickBlend) + punchBob * kickBlend;
-  const scale = XIANYU_FX.kick ? 1 + kick * heat * 0.022 : 1;
-  const dw = Math.round(w * scale), dh = Math.round(h * scale);
-  const dx = Math.round(ox - (dw - w) / 2);
-  const dy = Math.round(oy + bob - (dh - h) / 2);
-
-  let sprite = img;
-  const tint = XIANYU_FX.warmth ? heat * 0.22 + burst * 0.04 : 0;
-  if (tint > 0.005 && XIANYU_TINT_CTX) {
-    if (XIANYU_TINT.width !== w || XIANYU_TINT.height !== h) {
-      XIANYU_TINT.width = w;
-      XIANYU_TINT.height = h;
-    }
-    XIANYU_TINT_CTX.clearRect(0, 0, w, h);
-    XIANYU_TINT_CTX.imageSmoothingEnabled = false;
-    XIANYU_TINT_CTX.drawImage(img, 0, 0, w, h);
-    XIANYU_TINT_CTX.globalCompositeOperation = 'source-atop';
-    XIANYU_TINT_CTX.fillStyle = `rgba(255,51,43,${Math.min(0.24, tint).toFixed(3)})`;
-    XIANYU_TINT_CTX.fillRect(0, 0, w, h);
-    XIANYU_TINT_CTX.globalCompositeOperation = 'source-over';
-    sprite = XIANYU_TINT;
+  const dh = opts.rect ? opts.rect[3] : Math.round(SKIN_DEFS.xianyu.h * unit * (opts.scale ?? P.fishScale));
+  const dw = opts.rect ? opts.rect[2] : Math.round(dh * 1.5 * P.fishWidth);
+  const heat = sleeping ? 0 : smooth01((flush - .25)/.70);
+  const kick = !sleeping && XIANYU_FX.kick ? xianyuBeatKick(beat) : 0;
+  const bob = -Math.round(kick * Math.max(1,unit*.25));
+  const dx = opts.rect ? opts.rect[0]+Math.round(burst*unit*3) : Math.round(ox+SKIN_DEFS.xianyu.w*unit/2-dw/2);
+  const dy = opts.rect ? opts.rect[1]+bob : Math.round(oy+SKIN_DEFS.xianyu.h*unit/2-dh/2+bob);
+  let sprite=img;
+  const tint=XIANYU_FX.warmth && !sleeping ? heat*.24+burst*.06 : 0;
+  if(tint>.005 && XIANYU_TINT_CTX){
+    if(XIANYU_TINT.width!==dw||XIANYU_TINT.height!==dh){XIANYU_TINT.width=dw;XIANYU_TINT.height=dh}
+    XIANYU_TINT_CTX.clearRect(0,0,dw,dh);
+    XIANYU_TINT_CTX.imageSmoothingEnabled=false;
+    XIANYU_TINT_CTX.drawImage(img,0,0,dw,dh);
+    XIANYU_TINT_CTX.globalCompositeOperation='source-atop';
+    XIANYU_TINT_CTX.fillStyle=`rgba(255,51,43,${Math.min(.3,tint)})`;
+    XIANYU_TINT_CTX.fillRect(0,0,dw,dh);
+    XIANYU_TINT_CTX.globalCompositeOperation='source-over';
+    sprite=XIANYU_TINT;
   }
-
+  lastSpriteGeometry={frame,width:dw,height:dh,x:dx,y:dy,bob};
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(sprite, dx, dy, dw, dh);
@@ -469,9 +478,8 @@ function drawFish(ox, oy, unit, opts) {
   const vigor = 0.75 + flush * 0.5 + burst * 0.7;   // 心率越高 / 爆发时，突刺越有劲
   const thrust = sleeping ? 0 : (Math.max(0, Math.sin(beat * Math.PI * 2)) ** 3) * vigor;
   const jitter = zone === 'danger' ? (Math.sin(performance.now() / 40) * unit * 0.3) : 0;
-  const dash = burst > 0.05 ? (Math.sin((1 - burst) * Math.PI) * 3.0) : 0;
-  const sx = ox + thrust * unit * 1.2 + dash * unit + jitter;
-  const sy = oy + thrust * unit * 0.25 - (dash * unit * 0.12);
+  const sx = ox + thrust * unit * 1.2 * (1-burst) + jitter * (1-burst);
+  const sy = oy + thrust * unit * 0.25 * (1-burst);
   const g = (gx, gy) => [sx + gx * unit, sy + gy * unit];
   const inside = (a, b) => {
     const nx = (a - CGX) / RX, ny = (b - CGY) / RY;
@@ -593,31 +601,38 @@ function pixelTextWidth(text, dot) { return String(text).length * 4 * dot; }
 
 let state = {
   bpm: null, connected: false, zone: 'idle',
-  stats: {}, battery: null, warn: 120, danger: 150,
+  stats: {}, battery: null, warn: 90, danger: 100,
 };
-let history = { samples: [], warn: 120, danger: 150 };
+let history = { samples: [], warn: 90, danger: 100 };
 let phase = 0, lastT = performance.now();
 
 const DEMO = params.get('demo') === '1';
 const DEMO_CONTROLLED = DEMO && params.get('controlled') === '1';
 let demoOverrideBpm = 82;
+let demoOverrideBase = 70;
 let lastDemoPublish = 0;
 if (DEMO_CONTROLLED) {
   window.addEventListener('message', event => {
     if (event.origin !== location.origin || event.source !== window.parent) return;
     const msg = event.data;
     if (!msg || msg.type !== 'fish-demo-control') return;
+    if(Number.isFinite(msg.base))demoOverrideBase=Math.max(40,Math.min(150,msg.base));
+    if(Object.prototype.hasOwnProperty.call(msg,'frame'))demoForcedFrame=[...XIANYU_STAGES,'burst','recover'].includes(msg.frame)?msg.frame:null;
     if (Number.isFinite(msg.bpm)) {
       demoOverrideBpm = Math.max(50, Math.min(190, Math.round(msg.bpm)));
       state.bpm = demoOverrideBpm;
       state.connected = true;
-      state.base = 70;
+      state.base = demoOverrideBase;
       state.recent = {p90: 100, window: 600};
     }
+    if (Number.isFinite(msg.fishScale)) P.fishScale = Math.min(4, Math.max(0.5, msg.fishScale));
     if (msg.effects && typeof msg.effects === 'object') {
       for (const k of Object.keys(XIANYU_FX)) {
         if (typeof msg.effects[k] === 'boolean') XIANYU_FX[k] = msg.effects[k];
       }
+    }
+    if (Object.prototype.hasOwnProperty.call(msg, 'stage')) {
+      demoForcedStage = Number.isInteger(msg.stage) && msg.stage >= 0 && msg.stage <= 5 ? msg.stage : null;
     }
     if (msg.burst === true) {
       algo.burst = 1;
@@ -651,18 +666,46 @@ if (DEMO) {
     state.recent = DEMO_CONTROLLED ? {p90: 100, window: 600} :
       { min: Math.round(demoMin), max: Math.round(demoMax),
         avg: Math.round(demoSum / demoN), samples: demoN, window: 600 };
-    if (DEMO_CONTROLLED) state.base = 70;
-    state.zone = demoBpm >= 150 ? 'danger' : demoBpm >= 120 ? 'warn' : 'rest';
+    if (DEMO_CONTROLLED) state.base = demoOverrideBase;
+    state.zone = demoBpm >= state.danger ? 'danger' : demoBpm >= state.warn ? 'warn' : 'rest';
   }, 700);
-} else {
-  const es = new EventSource('/events');
-  es.onmessage = e => { try { state = JSON.parse(e.data); } catch (_) {} };
-  es.onerror = () => { state.connected = false; };
-  async function pollHistory() {
-    try { history = await (await fetch('/history')).json(); } catch (_) {}
+} else if (params.get('test') !== '1') {
+  import('/live.js').then(() => { HRLive.subscribe(snap => {
+    state = snap;
+    history = snap.history || {samples:[]};
+    receiveParams(snap.params);
+    if(previewDraft)receiveParams(previewDraft);
+  }); });
+}
+applyUrlParams();
+// Test/demo need defaults but never consume the real sensor stream.
+if ((DEMO && !DEMO_CONTROLLED) || params.get('test') === '1') fetch('/params').then(r=>r.json()).then(receiveParams).catch(()=>{});
+
+// The server and the native HUD call the exact same Python layout and PNG sampler.
+let visualLayout=null,visualLayoutKey='',visualAppliedKey='',layoutRetry=0,layoutError='';
+let scaledSpriteSet={key:'',images:{}};
+function ensureVisualLayout(){
+  const q=new URLSearchParams({width:Math.round(W),height:Math.round(H),skin:P.skin,fishScale:P.fishScale,fishWidth:P.fishWidth,traceLayout:P.traceLayout||'overlay',target:HUD_PREVIEW?'hud':'obs'});
+  const key=q.toString();
+  if(key!==visualLayoutKey&&performance.now()>=layoutRetry){
+    visualLayoutKey=key;
+    fetch('/render/layout?'+key).then(r=>{if(!r.ok)throw Error('布局加载失败');return r.json()}).then(v=>{
+      if(key!==visualLayoutKey)return;
+      visualLayout=v;visualAppliedKey=key;layoutRetry=0;layoutError='';
+      if(v.skin==='xianyu'){
+        const [, ,width,height]=v.sprite_rect,cacheKey=width+'x'+height;
+        if(scaledSpriteSet.key!==cacheKey){
+          scaledSpriteSet={key:cacheKey,images:{}};
+          for(const name of [...XIANYU_STAGES,'burst','recover']){
+            const img=new Image();scaledSpriteSet.images[name]=img;
+            img.src='/render/xianyu/'+name+'.png?width='+width+'&height='+height;
+            img.onerror=()=>{spriteError='统一尺寸素材加载失败：'+name};
+          }
+        }
+      }
+    }).catch(e=>{if(key===visualLayoutKey){visualLayoutKey='';layoutRetry=performance.now()+1000;layoutError=e.message}});
   }
-  setInterval(pollHistory, 1000);
-  pollHistory();
+  return visualAppliedKey===key?visualLayout:null;
 }
 
 /* ---------- 主循环 ---------- */
@@ -674,88 +717,77 @@ function frame(now) {
   const bpm = state.bpm;
   const age = state.age;
   const offline = !state.connected || (age != null && age > P.offlineAfter);
-  if (state.base != null) lockedBase = state.base;   // 服务端锁定后基准不再漂移
+  if (!TEST_MODE) lockedBase = state.base ?? null;   // latest baseline; TEST_BASE remains local to the acceptance channel
   // 皮肤实时跟随服务端（在控制台/调参面板切换后，这里立刻就变，不用刷新）
-  if (state.skin && state.skin !== P.skin && !params.get('skin')) P.skin = state.skin;
   const a = updateAlgo(bpm, state.stats, state.recent, dt, offline);
   const live = (bpm != null) && !offline;
 
   if (live) phase = (phase + (bpm / 60) * dt) % 1;
   else phase = (phase + 0.18 * dt) % 1;
 
+  const v=ensureVisualLayout();
+  if(!v){if(!TEST_MODE)requestAnimationFrame(frame);return;}
   ctx.clearRect(0, 0, W, H);
   if (PREVIEW_BG) { ctx.fillStyle = '#1b1f27'; ctx.fillRect(0, 0, W, H); }
 
   const zone = live ? (state.zone || 'idle') : 'idle';
-  const pad = Math.round(8 * SCALE);
+  const unitFish=v.unit,pad=v.pad,dot=v.dot;
+  const lowerTrace=P.traceLayout==='lower';
+  const centerY=v.digit_origin[1]+5*dot/2;
+  drawTrace(history.samples,v.trace_y,v.trace_amp);
+  const skin=SKIN_DEFS[P.skin]||SKIN_DEFS.fish;
+  const characterScale=v.character_scale;
+  const fishW=v.sprite_rect[2],fishX=v.fish_origin[0],fishY=v.fish_origin[1];
 
-  const centerY = H * 0.5;
-
-  // 1) 红色心率线（最底层，整条横穿；半透明）
-  drawTrace(history.samples, centerY, H * 0.44);
-
-  // 2) 咸鱼突刺增强：基于真实鱼坐标生成冲刺拖尾，避免画布外和遮挡问题
-  // 几何量已先计算，burst 不会打断动画循环
-  const skin = SKIN_DEFS[P.skin] || SKIN_DEFS.fish;
-  const unitFish = Math.max(2, Math.round(H * 0.030));
-  const fishW = skin.w * unitFish;
-  const fishX = pad + Math.round(4 * SCALE);
-  const fishY = centerY - (skin.h * unitFish) / 2 + unitFish * 0.5;
-
-  if (a.burst > 0.05 && (P.skin === 'fish' || P.skin === 'xianyu')) {
-    const dash = Math.sin((1 - a.burst) * Math.PI);
-    ctx.globalAlpha = a.burst * 0.25;
-    for (let i = 1; i <= 3; i++) {
-      px(fishX - i * 6 * SCALE, fishY + unitFish * 4, fishW * 0.25, unitFish, '#ff3b30');
-    }
-    ctx.globalAlpha = a.burst * 0.9;
+  // Keep speed lines inside the canvas and splashes above the trace band.
+  const dashOffset = live && (P.skin === 'fish' || P.skin === 'xianyu') ? a.burst * unitFish * 3 : 0;
+  if (a.burst > 0.05 && (P.skin === 'fish' || (P.skin === 'xianyu' && !xianyuBakedEffects))) {
+    ctx.globalAlpha = a.burst * 0.7;
+    for (let i = 1; i <= 3; i++)
+      px(fishX - i * 8 * SCALE, H*.12 + i*4*SCALE, 5*SCALE, 2*SCALE, '#ff3b30');
+    ctx.globalAlpha = a.burst * 0.95;
     for (let i = 0; i < 6; i++) {
-      const sx = fishX + fishW + i * 5 * SCALE;
-      const sy = centerY + (i % 2 ? -1 : 1) * (6 + i) * SCALE;
-      px(sx, sy, 2*SCALE, 2*SCALE, '#bfe9ff');
+      const sx = Math.min(W*.58, fishX + fishW*.65 + i*5*SCALE);
+      const sy = H * (i % 2 ? .09 : .57) + (i%3)*3*SCALE;
+      px(sx, sy, 3*SCALE, 3*SCALE, '#bfe9ff');
     }
     ctx.globalAlpha = 1;
   }
 
   // 2) 角色（鱼 / 幽灵，按皮肤切换；盖在线的上层）
-  drawCharacter(fishX, fishY, unitFish, {
-    zone, beat: phase, sleeping: !live, bpm, flush: a.pSmooth, burst: a.burst,
+  drawCharacter(fishX + dashOffset, fishY, unitFish, {
+    zone, beat: phase, sleeping: !live, bpm, flush: a.pSmooth, burst: a.burst, scale: characterScale, rect: v.sprite_rect,
   });
 
   // 3) 数字（压在线上；离线显示 ---）
-  const dot = Math.max(3, Math.round(H / 16));
   const text = live ? String(Math.round(bpm)).padStart(3, '0') : '---';
   let color = live ? colorOfIntensity(a.pSmooth) : PAL.dim;
   if (a.fullyRed) color = mixColor(color, '#c1130c', 0.55);               // 满红：压深
   if (a.burst > 0.05) color = mixColor(color, '#ffffff', a.burst * 0.55); // 爆发瞬间提亮
   const textW = pixelTextWidth(text, dot);
-  const tx = Math.max(fishX + fishW + pad, W - pad * 2 - textW);
-  const ty = centerY - (5 * dot) / 2;
+  const tx = v.digit_origin[0];
+  const ty = v.digit_origin[1];
   pixelText(tx, ty, text, dot, color, 'rgba(0,0,0,0.55)');
-
-  // 心跳时数字上浮一像素（柔和的动感）
-  if (live && Math.abs(Math.sin(phase * Math.PI * 2)) > 0.8) {
-    pixelText(tx, ty - 1, text, dot, color, 'rgba(0,0,0,0.55)');
-  }
 
   // 4) 连接状态点（右上角，很小）
   const d = Math.max(2, Math.round(H * 0.03));
   px(W - pad - d * 2, pad, d * 2, d * 2,
      live ? PAL.cool : (offline ? '#c0392b' : PAL.hot));
 
-  if (DEMO_CONTROLLED && now - lastDemoPublish >= 250 && window.parent !== window) {
+  if ((DEMO_CONTROLLED || PREVIEW) && now - lastDemoPublish >= 250 && window.parent !== window) {
     lastDemoPublish = now;
     window.parent.postMessage({
-      type: 'fish-demo-state', bpm: live ? bpm : null,
+      type: PREVIEW ? 'fish-preview-state' : 'fish-demo-state', bpm: live ? bpm : null,
       intensity: Number(a.pSmooth.toFixed(3)),
       burst: Number(a.burst.toFixed(3)),
-      frame: lastXianyuFrame,
+      frame: P.skin==='xianyu'?lastXianyuFrame:P.skin,
       base: a.anchors ? Math.round(a.anchors.B) : null,
       red: a.anchors ? Math.round(a.anchors.R) : null,
+      assetError:spriteError||layoutError, geometry:lastSpriteGeometry, layout:v,
       heartbeatHz: live ? Number((bpm / 60).toFixed(2)) : 0
     }, location.origin);
   }
-  requestAnimationFrame(frame);
+  if (!TEST_MODE) requestAnimationFrame(frame); // 验收台由 testTick 驱动，防止两套 RAF 并行
 }
 
 fitCanvas();
@@ -772,23 +804,20 @@ let TEST_HR = null, TEST_NOISE = false, TEST_BASE = null;
 
 // 当前会画哪一帧（与 drawXianyu 的判据保持一致，验收时看得见）
 function currentFrame() {
-  const flush = algo.pSmooth, burst = algo.burst;
-  const sleeping = state.bpm == null || !state.connected;
-  if (P.skin === 'xianyu') return sleeping ? 'idle(离线)' : pickXianyuFrame({ sleeping, flush, burst });
-  const zone = state.zone || 'idle';
-  if (sleeping) return 'idle(离线)';
-  if (burst > 0.55) return 'burst';
-  if (burst > 0.08 || zone === 'danger') return 'attack';
-  if (zone === 'warn' || flush > 0.55) return 'alert';
+  if (state.bpm == null || !state.connected) return 'idle(离线)';
+  if (P.skin === 'xianyu') return lastXianyuFrame;
+  if (algo.burst > .30) return 'burst';
+  if (algo.burst > .08) return 'recover';
   return 'idle';
 }
 
 if (TEST_MODE) {
   window.addEventListener('message', ev => {
+    if (ev.origin !== location.origin || ev.source !== parent) return;
     const m = ev.data;
     if (!m || typeof m !== 'object') return;
     if (m.type === 'hr') TEST_HR = (m.bpm == null ? null : +m.bpm);
-    else if (m.type === 'lock') TEST_BASE = (m.bpm == null ? null : +m.bpm);
+    else if (m.type === 'lock') { TEST_BASE = (m.bpm == null ? null : +m.bpm); lockedBase = TEST_BASE; }
     else if (m.type === 'noise') TEST_NOISE = !!m.on;
   });
 }
@@ -810,6 +839,7 @@ function testTick(now) {
     // 让"开播时锁定基准"这件事在验收里可控
     if (TEST_BASE != null) lockedBase = TEST_BASE;
   }
+  if (TEST_HR == null) { state.bpm = null; state.connected = false; }
   frame(now);
   drawTestOverlay();
   try {

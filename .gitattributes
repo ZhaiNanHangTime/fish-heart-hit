@@ -1,0 +1,3 @@
+# Preserve release-manifest bytes, GBK BAT files and UTF-16 VBS files.
+# This release contains mixed line endings; do not apply checkout conversion.
+* -text

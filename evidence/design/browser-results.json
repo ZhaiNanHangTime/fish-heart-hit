@@ -1,0 +1,19 @@
+{
+  "engine": "155.0.8059.84",
+  "visibility": "visible",
+  "checks": [
+    "six absolute stages; +/-1 bpm jitter does not toggle at the 8 bpm boundary",
+    "all eight material PNGs load; test mode schedules testTick only",
+    "test baseline override survives frame(); clearing BPM makes test channel offline",
+    "URL skin/number/boolean overrides survive SSE configuration updates",
+    "live overlay follows server skin and params without reload",
+    "8 poses x 5 heartbeat phases: identical geometry, kick=false has zero bob and zero scale modulation",
+    "new eight states match input PNG hashes; normalized pixels are unchanged, embedded splash/trail is not duplicated, original fish effects remain, eight visible state screenshots",
+    "both trace layouts: draft isolation, apply broadcasts to live OBS page, saved choice survives reload, URL override, real canvas geometry and background draw order",
+    "interactive HUD controls: desktop preview, independent width/height, one apply saves the visible skin and size draft together, OBS dimensions remain separate, presets, reload and external updates",
+    "50–400% controls; 400% sprite fits a visible OBS canvas without clipping; HUD-style partial skin/scale POST broadcasts to OBS and console",
+    "single control: live vs draft isolation, persistence, edits during save, HUD control, three tools, effects redirect, mobile layout",
+    "no uncaught JS errors across all pages and nested preview/test frames"
+  ],
+  "errors": []
+}

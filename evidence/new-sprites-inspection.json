@@ -1,0 +1,246 @@
+{
+  "input_zip_sha256": "3c447726286be5f068c1bbb2a29dff9a0d87f9f772667e6af03350eb9eea4932",
+  "checks": "PNG dimensions, RGBA and edge transparency independently verified; bright-body connected components are estimates, not proof of the declared 208x160 anatomy box.",
+  "frames": [
+    {
+      "frame": "idle",
+      "size": [
+        576,
+        384
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "nontransparent_bbox": [
+        117,
+        22,
+        475,
+        374
+      ],
+      "edges_clear": true,
+      "bright_body_component_bbox_estimate": [
+        185,
+        144,
+        392,
+        304
+      ],
+      "bright_body_component_center_estimate": [
+        288.5,
+        224.0
+      ],
+      "sha256": "8494b426a690ef0db25152211738ea08dc7c7c8069edcbb27842960ea3acd1a7"
+    },
+    {
+      "frame": "alert_low",
+      "size": [
+        576,
+        384
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "nontransparent_bbox": [
+        112,
+        36,
+        483,
+        372
+      ],
+      "edges_clear": true,
+      "bright_body_component_bbox_estimate": [
+        184,
+        144,
+        391,
+        304
+      ],
+      "bright_body_component_center_estimate": [
+        287.5,
+        224.0
+      ],
+      "sha256": "cecd2db34ce4491e8a557707b4b3c8bb09da9e8eb59027fa1b4599cb16d799ad"
+    },
+    {
+      "frame": "alert_mid",
+      "size": [
+        576,
+        384
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "nontransparent_bbox": [
+        113,
+        27,
+        474,
+        372
+      ],
+      "edges_clear": true,
+      "bright_body_component_bbox_estimate": [
+        184,
+        144,
+        392,
+        304
+      ],
+      "bright_body_component_center_estimate": [
+        288.0,
+        224.0
+      ],
+      "sha256": "8e622fe0f8e0a7f3fce61a232a9104fa4c1d226b7fdf109ca46b29b8ac85803a"
+    },
+    {
+      "frame": "tense",
+      "size": [
+        576,
+        384
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "nontransparent_bbox": [
+        105,
+        48,
+        497,
+        377
+      ],
+      "edges_clear": true,
+      "bright_body_component_bbox_estimate": [
+        184,
+        144,
+        392,
+        304
+      ],
+      "bright_body_component_center_estimate": [
+        288.0,
+        224.0
+      ],
+      "sha256": "da00c4cfaff569ac5756c4ecaf97d77990daec887d3f070ca355a992745ab777"
+    },
+    {
+      "frame": "high",
+      "size": [
+        576,
+        384
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "nontransparent_bbox": [
+        109,
+        62,
+        483,
+        370
+      ],
+      "edges_clear": true,
+      "bright_body_component_bbox_estimate": [
+        184,
+        144,
+        392,
+        304
+      ],
+      "bright_body_component_center_estimate": [
+        288.0,
+        224.0
+      ],
+      "sha256": "ccb8afbd77584688fb8017e8472437bec8d0d7aefe20921b023cff95dd5712f1"
+    },
+    {
+      "frame": "charge",
+      "size": [
+        576,
+        384
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "nontransparent_bbox": [
+        63,
+        25,
+        486,
+        382
+      ],
+      "edges_clear": true,
+      "bright_body_component_bbox_estimate": [
+        184,
+        144,
+        392,
+        304
+      ],
+      "bright_body_component_center_estimate": [
+        288.0,
+        224.0
+      ],
+      "sha256": "e1e400bf0ffa7f506ca93bc1c2f2ac5c745fe8e6f7c70e5dece148dad99eff29"
+    },
+    {
+      "frame": "burst",
+      "size": [
+        576,
+        384
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "nontransparent_bbox": [
+        21,
+        25,
+        561,
+        369
+      ],
+      "edges_clear": true,
+      "bright_body_component_bbox_estimate": [
+        185,
+        144,
+        392,
+        304
+      ],
+      "bright_body_component_center_estimate": [
+        288.5,
+        224.0
+      ],
+      "sha256": "83c0c9813e0ab97b80600231063b347ac4811cdb7c49d780269a99a1c751e452"
+    },
+    {
+      "frame": "recover",
+      "size": [
+        576,
+        384
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "nontransparent_bbox": [
+        70,
+        47,
+        506,
+        367
+      ],
+      "edges_clear": true,
+      "bright_body_component_bbox_estimate": [
+        185,
+        144,
+        392,
+        304
+      ],
+      "bright_body_component_center_estimate": [
+        288.5,
+        224.0
+      ],
+      "sha256": "b22e4dad98ee2daf2a6d3093230b70df3f9f692401616f994c6690c7f9a4518d"
+    }
+  ]
+}

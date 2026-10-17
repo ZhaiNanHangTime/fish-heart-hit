@@ -33,6 +33,10 @@ from datetime import datetime
 from pathlib import Path
 
 from aiohttp import web
+from hr_config import DEFAULT_PARAMS, GROUPS, merge_params
+from hr_baseline import Baseline
+from hr_runtime import RuntimeControl, APP_ID, CONTROL_PROTOCOL, root_id
+from hr_visual import layout as visual_layout, sprite_png, FRAMES
 from bleak import BleakClient, BleakScanner
 
 HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb"
@@ -69,58 +73,23 @@ def remember_device(address: str) -> None:
     except Exception as exc:  # noqa: BLE001
         log.warning("写入 %s 失败：%s", DEVICES_FILE.name, exc)
 
-# 可调参数的默认值（与网页里的 P 对象保持一致）
-DEFAULT_PARAMS = {
-    "skin": "fish",              # 皮肤：fish（咸鱼）/ ghost（幽灵）/ xianyu（咸鱼突刺）
-    "minGap": 22, "maxGap": 30, "p90Offset": 3, "anchorTau": 15,
-    "yellowAt": 0.4, "orangeAt": 0.7,
-    "attack": 2, "release": 6, "redHold": 2, "redDrop": 5, "offlineAfter": 5,
-    "burstRise": 10, "burstAbove": 15, "burstWindow": 30, "burstCooldown": 30,
-}
-
-
 def load_params() -> dict:
     params = dict(DEFAULT_PARAMS)
     if PARAMS_FILE.exists():
         try:
-            saved = json.loads(PARAMS_FILE.read_text(encoding="utf-8"))
-            for k, v in (saved or {}).items():
-                if k in params:
-                    params[k] = v
-        except Exception:  # noqa: BLE001
-            pass
+            params = merge_params(params, json.loads(PARAMS_FILE.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError) as exc:
+            logging.getLogger("hr").warning("参数文件无效，使用默认值：%s", exc)
     return params
 
 
-def save_params(values: dict) -> dict:
-    params = load_params()
-    for k, v in (values or {}).items():
-        if k not in params:
-            continue
-        if isinstance(params[k], str):          # 皮肤这类字符串参数
-            params[k] = str(v)
-            continue
-        try:
-            params[k] = float(v)
-        except (TypeError, ValueError):
-            pass
-    PARAMS_FILE.write_text(json.dumps(params, ensure_ascii=False, indent=2), encoding="utf-8")
+def save_params(values: dict, base=None) -> dict:
+    params = merge_params(base or load_params(), values)
+    temporary = PARAMS_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(params, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(PARAMS_FILE)
     return params
 
-
-_PARAMS_CACHE: dict = {"mtime": -1.0, "data": None}
-
-
-def current_params() -> dict:
-    """带 mtime 缓存的参数读取 —— 供 snapshot 每帧调用，不做无谓的文件 IO。"""
-    try:
-        mt = PARAMS_FILE.stat().st_mtime if PARAMS_FILE.exists() else 0.0
-    except OSError:
-        mt = 0.0
-    if _PARAMS_CACHE["data"] is None or mt != _PARAMS_CACHE["mtime"]:
-        _PARAMS_CACHE["mtime"] = mt
-        _PARAMS_CACHE["data"] = load_params()
-    return _PARAMS_CACHE["data"]
 
 log = logging.getLogger("hr")
 
@@ -137,8 +106,17 @@ class Hub:
         self.bpm: int | None = None
         self.updated_at: float = 0.0
         self.connected = False
-        self.warn = warn
-        self.danger = danger
+        self.params = merge_params(load_params(), {
+            **({"warn": warn} if warn is not None else {}),
+            **({"danger": danger} if danger is not None else {}),
+        })
+        self.warn = self.params["warn"]
+        self.danger = self.params["danger"]
+        self.params_version = time.time_ns() // 1_000_000
+        self.revision = 0
+        self.visual_stage = 0
+        self.runtime = None
+        self.baseline = Baseline()
         self.stale_after = stale_after
 
         self.history: deque[tuple[float, int]] = deque(maxlen=history_len)
@@ -150,7 +128,7 @@ class Hub:
 
         self.battery: int | None = None
         self.battery_at: float = 0.0
-        self.base_bpm: int | None = None      # 开播头 3 分钟锁定的个人平静基准
+        self.base_bpm: float | None = None  # rolling P25, tau=60s
 
         self.queues: set[asyncio.Queue] = set()
         self.csv_writer = None
@@ -180,6 +158,8 @@ class Hub:
         self.bpm = bpm
         self.updated_at = now
         self.history.append((now, bpm))
+        self.baseline.add(now, bpm)
+        self.base_bpm = self.baseline.value
         self.samples += 1
         self.total += bpm
         self.minimum = bpm if self.minimum is None else min(self.minimum, bpm)
@@ -202,6 +182,8 @@ class Hub:
         self.minimum = None
         self.maximum = None
         self.history.clear()
+        self.baseline = Baseline()
+        self.base_bpm = None
         self.publish()
 
     # ---------- state export ----------
@@ -216,31 +198,11 @@ class Hub:
             return "warn"
         return "rest"
 
-    def calibrate_base(self) -> None:
-        """开播头 3 分钟锁定个人平静基准，之后不再随整场最低值漂移。
-
-        为什么必须在开播时锁定：如果 B 用「全场累计的 min/avg」，
-        那么开播初期样本少、min 偏高 → B 偏高 → R 被顶到很高；
-        等你后来跑出低点，B 才降下来，但那时 R 已经错过你的高峰了。
-        （真实数据里出现过 R 高达 114、而本人峰值只有 104 的情况）
-        """
-        if self.base_bpm is not None:
-            return
-        now = time.time()
-        if now - self.session_started < 180 or len(self.history) < 30:
-            return
-        vals = sorted(v for _t, v in self.history)
-        self.base_bpm = vals[max(0, int(len(vals) * 0.10))]   # 10 分位 ≈ 刚坐下的平静水平
-
-    def calibrate_now(self, window: float = 60.0) -> None:
-        """手动校准：用最近 60 秒的 25 分位当基准（点按钮时应当刚坐下平静）。"""
-        cutoff = time.time() - window
-        vals = sorted(v for t, v in self.history if t >= cutoff)
-        if len(vals) < 10:                       # 样本不够就用最近的全部
-            vals = sorted(v for _t, v in self.history)[-60:]
-        if not vals:
-            return
-        self.base_bpm = vals[max(0, int(len(vals) * 0.25))]
+    def calibrate_now(self) -> dict:
+        ok, message = self.baseline.calibrate(time.time())
+        self.base_bpm = self.baseline.value
+        self.publish()
+        return {"ok": ok, "message": message, "base": self.base_bpm}
 
     def recent_stats(self, window: float = 600.0) -> dict:
         """最近 window 秒的统计：min / avg / max / p90。
@@ -262,14 +224,16 @@ class Hub:
             "avg": round(sum(vals) / n),
             "p90": vals[min(n - 1, int(n * 0.9))],
             "p50": vals[min(n - 1, int(n * 0.5))],
+            "p25": vals[min(n - 1, int(n * 0.25))],
             "samples": n,
             "window": window,
         }
 
     def snapshot(self) -> dict:
-        self.calibrate_base()
+        self.warn, self.danger = self.params["warn"], self.params["danger"]
         age = (time.time() - self.updated_at) if self.updated_at else None
-        live = self.bpm is not None and age is not None and age < self.stale_after
+        live = (self.bpm is not None and age is not None
+                and age < min(self.stale_after, self.params["offlineAfter"]))
         bpm = self.bpm if live else None
         if bpm is None:
             zone = "idle"
@@ -279,6 +243,15 @@ class Hub:
             zone = "warn"
         else:
             zone = "rest"
+        # One live Schmitt state for every renderer, including newly opened windows.
+        if bpm is None or not self.connected:
+            self.visual_stage = 0
+        else:
+            delta = bpm - (self.base_bpm if self.base_bpm is not None else 70)
+            while self.visual_stage < 5 and delta >= (self.visual_stage+1)*4+2:
+                self.visual_stage += 1
+            while self.visual_stage > 0 and delta < self.visual_stage*4-2:
+                self.visual_stage -= 1
         return {
             "bpm": bpm,
             "connected": self.connected,
@@ -293,13 +266,21 @@ class Hub:
             },
             "battery": self.battery,
             "base": self.base_bpm,
-            "skin": current_params().get("skin", "fish"),
+            "skin": self.params["skin"],
+            "params": dict(self.params),
+            "params_version": self.params_version,
+            "revision": self.revision,
+            "baseline": self.baseline.status(time.time()),
+            "history": {"samples": [[round(t - self.session_started, 2), v] for t, v in self.history]},
+            "visual_stage": self.visual_stage,
+            "runtime": self.runtime.status() if self.runtime else {"available":False,"hud":False},
             "recent": self.recent_stats(),
             "warn": self.warn,
             "danger": self.danger,
         }
 
     def publish(self) -> None:
+        self.revision += 1
         snap = self.snapshot()
         for queue in list(self.queues):
             if queue.full():
@@ -319,13 +300,14 @@ async def read_battery(client: BleakClient, hub: Hub) -> None:
         log.debug("battery read failed: %s", exc)
 
 
-async def ble_loop(hub: Hub, address: str | None, stop: asyncio.Event) -> None:
+async def ble_loop(hub: Hub, address: str | None, stop: asyncio.Event,
+                   name: str | None = None, attempts: int = 1) -> None:
     """Keep the heart-rate subscription alive forever.
 
     address 为 None（或设备找不到）时会重新扫描，因此不依赖写死的地址，
     也容忍 macOS 每次连接都换随机地址的行为。
     """
-    holder = {"addr": address or next(iter(load_known_devices()), None)}
+    holder = {"addr": address or (None if name else next(iter(load_known_devices()), None))}
     backoff = 2.0
     while not stop.is_set():
         try:
@@ -338,7 +320,7 @@ async def ble_loop(hub: Hub, address: str | None, stop: asyncio.Event) -> None:
                     log.info("no address yet; scanning for a heart-rate broadcaster…")
                 hub.connected = False
                 hub.publish()
-                found = await scan_for_heart_rate()
+                found = await scan_for_heart_rate(name=name, attempts=attempts)
                 if found is None:
                     log.warning("no heart-rate device found; retry in %.0fs", backoff)
                     await asyncio.sleep(backoff)
@@ -400,7 +382,8 @@ es.onmessage=e=>{const s=JSON.parse(e.data);document.getElementById('v').textCon
 </body></html>"""
 
 
-def build_app(hub: Hub) -> web.Application:
+def build_app(hub: Hub, runtime=None) -> web.Application:
+    hub.runtime = runtime
     async def index(_request: web.Request) -> web.Response:
         page = HERE / "web" / "pixel.html"
         if page.exists():
@@ -410,7 +393,7 @@ def build_app(hub: Hub) -> web.Application:
 
     async def effects(_request: web.Request) -> web.Response:
         """Local-only visual sandbox. The iframe uses demo=1, never the BLE stream."""
-        return web.FileResponse(HERE / 'web' / 'effects.html')
+        raise web.HTTPFound("/console#effects")
 
     async def plain(_request: web.Request) -> web.Response:
         page = HERE / "web" / "plain.html"
@@ -425,14 +408,36 @@ def build_app(hub: Hub) -> web.Application:
         return web.Response(text="tune page missing", status=404)
 
     async def params_get(_request: web.Request) -> web.Response:
-        return web.json_response(load_params())
+        return web.json_response(hub.params)
 
     async def params_post(request: web.Request) -> web.Response:
         try:
             body = await request.json()
-        except Exception:  # noqa: BLE001
-            body = {}
-        return web.json_response(save_params(body))
+            saved = save_params(body, hub.params)
+        except (ValueError, TypeError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        hub.params = saved
+        hub.params_version += 1
+        hub.publish()  # configuration changes reach idle/disconnected clients immediately
+        return web.json_response(saved, headers={"X-Params-Version": str(hub.params_version)})
+
+    async def schema(_request):
+        return web.json_response({"defaults": DEFAULT_PARAMS, "groups": GROUPS})
+
+    async def live_js(_request):
+        return web.FileResponse(HERE / "web" / "live.js")
+
+    async def control_js(_request):
+        return web.FileResponse(HERE/"web/control.js")
+
+    async def control_css(_request):
+        return web.FileResponse(HERE/"web/control.css")
+
+    async def studio_theme(_request):
+        return web.FileResponse(HERE/"web/studio-theme.css")
+
+    async def monitor(_request):
+        return web.FileResponse(HERE / "web" / "monitor.html")
 
     async def theme(_request: web.Request) -> web.Response:
         """共享主题样式（各页面统一视觉）。"""
@@ -481,8 +486,8 @@ def build_app(hub: Hub) -> web.Application:
             path.relative_to(logs_dir)          # 防目录穿越
         except Exception:  # noqa: BLE001
             return web.json_response({"error": "bad path"}, status=400)
-        if not path.exists():
-            return web.json_response({"error": "not found"}, status=404)
+        if not path.is_file() or path.suffix.lower() != ".csv":
+            return web.json_response({"error": "CSV file not found"}, status=404)
 
         rows = []
         with path.open(encoding="utf-8-sig") as fh:
@@ -496,8 +501,7 @@ def build_app(hub: Hub) -> web.Application:
         rows.sort()
 
         import replay_check as rc
-        rc.P["minGap"] = load_params()["minGap"]      # 用当前面板参数回放
-        res = rc.replay(rows)
+        res = rc.replay(rows, params=hub.params)
         dur = max(0.1, (rows[-1][0] - rows[0][0]) / 60.0)
         vals = [v for _t, v in rows]
         return web.json_response({
@@ -511,8 +515,8 @@ def build_app(hub: Hub) -> web.Application:
 
     async def calibrate(_request: web.Request) -> web.Response:
         """手动校准基准：用最近 60 秒的平静水平重设 B。"""
-        hub.calibrate_now()
-        return web.json_response({"base": hub.base_bpm})
+        result = hub.calibrate_now()
+        return web.json_response(result, status=200 if result["ok"] else 409)
 
     async def hr(_request: web.Request) -> web.Response:
         return web.json_response(hub.snapshot())
@@ -533,8 +537,78 @@ def build_app(hub: Hub) -> web.Application:
         hub.reset_session()
         return web.json_response({"ok": True})
 
+    async def render_layout(request):
+        try:
+            values={key:request.query[key] for key in ('skin','traceLayout') if key in request.query}
+            if 'fishScale' in request.query:values['fishScale']=float(request.query['fishScale'])
+            if 'fishWidth' in request.query:values['fishWidth']=float(request.query['fishWidth'])
+            params=merge_params(hub.params,values)
+            result=visual_layout(float(request.query['width']),float(request.query['height']),params,request.query.get('target','hud'))
+            return web.json_response(result,headers={'Cache-Control':'no-store'})
+        except (ValueError,TypeError,KeyError,OverflowError):
+            return web.json_response({'error':'无效画布参数'},status=400)
+
+    async def render_sprite(request):
+        try:
+            frame=request.match_info['frame']
+            if frame not in FRAMES:raise ValueError('未知状态')
+            width,height=int(request.query['width']),int(request.query['height'])
+            data=await asyncio.to_thread(sprite_png,frame,width,height)
+            return web.Response(body=data,content_type='image/png',headers={'Cache-Control':'public, max-age=3600'})
+        except (ValueError,TypeError,KeyError):
+            return web.json_response({'error':'无效素材参数'},status=400)
+
     async def health(_request: web.Request) -> web.Response:
-        return web.json_response({"ok": True, "connected": hub.connected})
+        return web.json_response({"ok": True, "connected": hub.connected,
+            "app":APP_ID, "control_protocol":CONTROL_PROTOCOL, "root_id":root_id(HERE)})
+
+    def require_control(request, mutation=False):
+        if runtime is None:
+            raise web.HTTPServiceUnavailable(text="总控未启用")
+        if request.remote not in ("127.0.0.1", "::1"):
+            raise web.HTTPForbidden()
+        origin = request.headers.get("Origin")
+        if origin and origin != str(request.url.origin()):
+            raise web.HTTPForbidden()
+        if mutation and request.headers.get("X-Control-Token") != runtime.token:
+            raise web.HTTPForbidden()
+
+    async def control_get(request):
+        require_control(request)
+        return web.json_response({**runtime.status(), "token":runtime.token},headers={"Cache-Control":"no-store"})
+
+    async def control_hud(request):
+        require_control(request,True)
+        try:
+            body=await request.json()
+            if not isinstance(body,dict) or type(body.get("visible")) is not bool:
+                raise ValueError("visible必须为布尔值")
+            result=await runtime.set_hud(body["visible"])
+        except (ValueError,TypeError) as exc:
+            return web.json_response({"error":str(exc)},status=400)
+        return web.json_response(result)
+
+    async def control_shutdown(request):
+        require_control(request,True)
+        runtime.request_shutdown()
+        return web.json_response({"ok":True})
+
+    async def control_panel(request):
+        require_control(request,True)
+        try:
+            runtime.request_panel((await request.json()).get('target'))
+            return web.json_response(runtime.status())
+        except (ValueError,TypeError,AttributeError):
+            return web.json_response({'error':'无效面板'},status=400)
+
+    async def control_edit(request):
+        require_control(request,True)
+        try:
+            editing=(await request.json()).get('editing')
+            if type(editing) is not bool:raise ValueError('editing必须为布尔值')
+            return web.json_response(await runtime.edit_hud(editing))
+        except (ValueError,TypeError,AttributeError):
+            return web.json_response({'error':'无效边界设置'},status=400)
 
     async def events(request: web.Request) -> web.StreamResponse:
         queue: asyncio.Queue = asyncio.Queue(maxsize=8)
@@ -549,7 +623,11 @@ def build_app(hub: Hub) -> web.Application:
         try:
             await response.write(f"data: {json.dumps(hub.snapshot())}\n\n".encode())
             while True:
-                snap = await queue.get()
+                try:
+                    snap = await asyncio.wait_for(queue.get(),timeout=2)
+                except asyncio.TimeoutError:
+                    if request.transport is None or request.transport.is_closing(): break
+                    snap=hub.snapshot()  # Service heartbeat remains live without a BLE reading.
                 await response.write(f"data: {json.dumps(snap)}\n\n".encode())
         except (asyncio.CancelledError, ConnectionResetError):
             pass
@@ -557,8 +635,23 @@ def build_app(hub: Hub) -> web.Application:
             hub.queues.discard(queue)
         return response
 
-    app = web.Application()
+    @web.middleware
+    async def local_mutations(request, handler):
+        if request.method == "POST":
+            origin=request.headers.get("Origin")
+            if origin and origin != str(request.url.origin()):
+                raise web.HTTPForbidden()
+        return await handler(request)
+
+    app = web.Application(middlewares=[local_mutations])
     app.router.add_get("/", index)
+    app.router.add_get("/pixel.html", index)
+    app.router.add_get("/monitor", monitor)
+    app.router.add_get("/live.js", live_js)
+    app.router.add_get("/control.js",control_js)
+    app.router.add_get("/control.css",control_css)
+    app.router.add_get("/studio-theme.css",studio_theme)
+    app.router.add_get("/params/schema", schema)
     app.router.add_get("/plain", plain)
     app.router.add_get("/effects", effects)
     app.router.add_get("/tune", tune)
@@ -583,6 +676,13 @@ def build_app(hub: Hub) -> web.Application:
     app.router.add_get("/reset", reset)
     app.router.add_post("/reset", reset)
     app.router.add_get("/health", health)
+    app.router.add_get('/render/layout',render_layout)
+    app.router.add_get('/render/xianyu/{frame}.png',render_sprite)
+    app.router.add_get("/control",control_get)
+    app.router.add_post("/control/hud",control_hud)
+    app.router.add_post("/control/shutdown",control_shutdown)
+    app.router.add_post('/control/panel',control_panel)
+    app.router.add_post('/control/hud-edit',control_edit)
     return app
 
 
@@ -594,42 +694,33 @@ async def main_async(args: argparse.Namespace) -> None:
         log.info("logging to %s", path)
 
     address = args.address
-    if not address:
-        log.info("未指定 --address，自动寻找心率设备（先试记住的地址，再扫描 + GATT 探测，"
-                 "最长约 %d 秒）…", int(args.scan_attempts * 40))
-        address = await scan_for_heart_rate(name=args.name, attempts=args.scan_attempts)
-        if address is None:
-            log.error("多轮扫描都没找到心率设备。请确认手环已开启「心率广播」并让屏幕亮着，"
-                      "然后重试；若手环广播时间窗很短，建议手动指定一次地址，"
-                      "之后会被记住：--address AA:BB:CC:DD:EE:FF 或 --name 设备名")
-            hub.close_csv()
-            return
-        log.info("使用设备 %s", address)
-
     stop = asyncio.Event()
 
     async def periodic_publish() -> None:
         while not stop.is_set():
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(1.0)
             hub.publish()
 
-    runner = web.AppRunner(build_app(hub))
+    runtime = RuntimeControl(HERE, f"http://127.0.0.1:{args.port}",stop,hub.publish)
+    runner = web.AppRunner(build_app(hub,runtime), shutdown_timeout=1)
     await runner.setup()
     await web.TCPSite(runner, args.host, args.port).start()
     log.info("web server on http://%s:%d/   (OBS browser source)", args.host, args.port)
 
     tasks = [
-        asyncio.create_task(ble_loop(hub, address, stop), name="ble"),
+        asyncio.create_task(ble_loop(hub, address, stop, args.name, args.scan_attempts), name="ble"),
         asyncio.create_task(periodic_publish(), name="publish"),
     ]
     try:
-        await asyncio.gather(*tasks)
+        await stop.wait()
     except asyncio.CancelledError:
         pass
     finally:
         stop.set()
         for task in tasks:
             task.cancel()
+        await asyncio.gather(*tasks,return_exceptions=True)
+        await runtime.close()
         hub.close_csv()
         await runner.cleanup()
 
@@ -754,8 +845,8 @@ def main() -> None:
                         help="自动扫描的轮数（每轮约 40 秒；手环广播时间窗短时可调大）")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--warn", type=float, default=120.0, help="bpm for 'fast' state")
-    parser.add_argument("--danger", type=float, default=150.0, help="bpm for 'alarm' state")
+    parser.add_argument("--warn", type=float, default=None, help="bpm for 'fast' state")
+    parser.add_argument("--danger", type=float, default=None, help="bpm for 'alarm' state")
     parser.add_argument("--stale-after", type=float, default=12.0)
     parser.add_argument("--history", type=int, default=600, help="rolling samples to keep")
     parser.add_argument("--csv-dir", default=str(HERE / "logs"))

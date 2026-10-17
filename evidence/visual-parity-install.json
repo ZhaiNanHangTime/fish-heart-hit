@@ -1,0 +1,22 @@
+{
+  "installed": true,
+  "target": "G:\\downloads\\heart-rate",
+  "backup": "G:\\downloads\\heart-rate-backups\\before-visual-parity-20261016-162631",
+  "changed_code_files": 9,
+  "private_files_verified": 37,
+  "private_hashes_match": true,
+  "graceful_restart": true,
+  "oneclick_entry_invoked": true,
+  "current_window_ui_verified": false,
+  "default_hud_size": [
+    240,
+    104
+  ],
+  "http_verified": true,
+  "device_connected_at_check": true,
+  "fresh_heart_rate_at_check": true,
+  "parity_cases": 36,
+  "all_native_browser_sprite_rgba_hashes_match": true,
+  "unit_tests": 27,
+  "browser_groups": 12
+}

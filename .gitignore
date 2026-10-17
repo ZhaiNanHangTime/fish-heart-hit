@@ -34,3 +34,7 @@ desktop.ini
 *.log
 *.tmp
 *~
+
+# local manager state / logs
+runtime/
+test-evidence/

@@ -1,0 +1,15 @@
+{
+  "installed": true,
+  "target": "G:\\downloads\\heart-rate",
+  "backup": "G:\\downloads\\heart-rate-backups\\before-preferred-width-20261016-165111",
+  "changed_code_files": 5,
+  "private_files_verified": 40,
+  "private_hashes_match": true,
+  "graceful_restart": true,
+  "oneclick_entry_invoked": true,
+  "current_window_ui_verified": false,
+  "default_hud_size": [
+    240,
+    104
+  ]
+}

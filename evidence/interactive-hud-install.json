@@ -1,0 +1,25 @@
+{
+  "installed": true,
+  "target": "G:\\downloads\\heart-rate",
+  "backup": "G:\\downloads\\heart-rate-backups\\before-interactive-hud-20261016-154100",
+  "changed_code_files": 8,
+  "private_files_verified": 35,
+  "private_hashes_match": true,
+  "graceful_restart": true,
+  "oneclick_entry_invoked": true,
+  "default_hud_size": [
+    240,
+    104
+  ],
+  "verified": true,
+  "desktop_size_at_check": [
+    240,
+    104
+  ],
+  "obs_size_at_check": [
+    520,
+    170
+  ],
+  "device_connected_at_check": false,
+  "hud_at_check": true
+}

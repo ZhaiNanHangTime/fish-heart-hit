@@ -1,0 +1,9 @@
+test_layout_and_sprite_endpoints_share_exact_native_bytes (test_visual.RenderApiTests.test_layout_and_sprite_endpoints_share_exact_native_bytes) ... ok
+test_exact_sprite_dimensions_and_original_pixel_samples (test_visual.VisualTests.test_exact_sprite_dimensions_and_original_pixel_samples) ... ok
+test_layout_fits_odd_dimensions_and_large_scale (test_visual.VisualTests.test_layout_fits_odd_dimensions_and_large_scale) ... ok
+test_width_only_changes_fish_not_height_digits_or_canvas (test_visual.VisualTests.test_width_only_changes_fish_not_height_digits_or_canvas) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 3.235s
+
+OK

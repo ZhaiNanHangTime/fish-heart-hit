@@ -14,6 +14,8 @@ import csv
 import math
 import sys
 from pathlib import Path
+from hr_config import DEFAULT_PARAMS
+from hr_baseline import Baseline
 
 # ---- 与网页 / 悬浮窗一致的那套参数 ----
 P = dict(
@@ -24,17 +26,9 @@ P = dict(
     anchor_tau=15.0,
     attack=2.0, release=6.0,
     red_hold=2.0, red_drop=5.0,
-    burst_rise=10, burst_above=15, burst_window=30.0, burst_cooldown=30.0,
+    burst_rise=8, burst_above=10, burst_window=30.0, burst_cooldown=30.0,
 )
 WINDOW = 600.0           # 最近 10 分钟
-
-
-def base_heart(hist: list) -> float:
-    if len(hist) < P["base_samples"]:
-        return P["base_fallback"]
-    vals = [v for _t, v in hist]
-    lo, avg = min(vals), sum(vals) / len(vals)
-    return max(45.0, lo + (avg - lo) * 0.25)
 
 
 def p90_at(hist: list, now: float):
@@ -45,7 +39,17 @@ def p90_at(hist: list, now: float):
     return vals[min(n - 1, int(n * 0.9))]
 
 
-def replay(rows: list) -> dict:
+PARAM_KEYS = {"minGap":"min_gap", "maxGap":"max_gap", "p90Offset":"p90_offset",
+              "anchorTau":"anchor_tau", "redHold":"red_hold", "redDrop":"red_drop",
+              "burstRise":"burst_rise", "burstAbove":"burst_above", "burstWindow":"burst_window",
+              "burstCooldown":"burst_cooldown", "attack":"attack", "release":"release"}
+
+def replay(rows: list, params=None) -> dict:
+    P = dict(globals()["P"])
+    if params is not None:
+        for key, val in params.items():
+            if key in PARAM_KEYS: P[PARAM_KEYS[key]] = val
+    baseline = Baseline()
     hist: list = []
     track: list = []
     anchors = None
@@ -69,13 +73,9 @@ def replay(rows: list) -> dict:
         last_t = t
         hist.append((t, bpm))
 
-        # 基准：头 3 分钟用累计估计，之后锁定不再漂移（与服务端行为一致）
-        if base_locked is None and (t - t_first) >= 180 and len(hist) >= 30:
-            _v = sorted(v for _tt, v in hist)
-            base_locked = _v[max(0, int(len(_v) * 0.10))]
-
-        # 1) 锚点（R 缓慢跟随）
-        B = float(base_locked) if base_locked is not None else base_heart(hist)
+        baseline.add(t, bpm)
+        # Same baseline component as the live server; frozen color/effect equations below.
+        B = baseline.value if baseline.value is not None else P["base_fallback"]
         p90 = p90_at(hist, t)
         if p90 is None:
             p90 = B + P["min_gap"]
@@ -131,7 +131,7 @@ def replay(rows: list) -> dict:
     if over_since is not None:
         longest_over = max(longest_over, seg_max)
     return dict(red=red_events, false_red=false_red, burst=burst_events,
-                anchors=anchors, r_trace=r_trace,
+                anchors=anchors, r_trace=r_trace, baseline_mode="rolling-p25",
                 over_points=over_points, longest_over=longest_over)
 
 
@@ -153,7 +153,13 @@ def main() -> int:
     rows.sort()
     dur_min = (rows[-1][0] - rows[0][0]) / 60.0
     vals = [v for _t, v in rows]
-    res = replay(rows)
+    options = dict(DEFAULT_PARAMS)
+    config_path = Path(__file__).resolve().parent / "params.json"
+    if config_path.exists():
+        import json
+        from hr_config import merge_params
+        options = merge_params(options, json.loads(config_path.read_text(encoding="utf-8")))
+    res = replay(rows, params=options)
     scale = 10.0 / max(0.1, dur_min)
 
     print(f"文件      : {path.name}")

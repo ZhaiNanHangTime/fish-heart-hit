@@ -1,0 +1,40 @@
+/* Pixel Design geometry adapted to the user's muted, classical brief.
+   Source and decisions: DESIGN.md. No remote runtime resources. */
+:root {
+ --bg:#e3e5da; --panel:#f3f1e7; --panel-soft:#e9e9dc;
+ --fg:#303d36; --muted:#626b5d; --edge:#b6bba8;
+ --accent:#695934; --green:#436653; --red:#914d44;
+ --forest:#303f37; --forest-deep:#26322c; --stage:#1c2521;
+ --copper:#b8ab82; --paper:#f3f1e7; --shadow:#bac1af; --header-danger:#e3b6a8;
+ --ui:'Microsoft YaHei UI','Microsoft YaHei',sans-serif;
+ --serif:'Noto Serif CJK SC','Source Han Serif SC','Songti SC',SimSun,serif;
+ --mono:'Cascadia Mono',Consolas,monospace;
+ --border-width:2px; --radius:5px;
+ --shadow-sm:2px 2px 0 var(--shadow); --shadow-lg:5px 5px 0 var(--shadow);
+}
+/* Instruments keep a dark plotting surface in the same pine palette. */
+body.studio-tool {
+ color-scheme:dark;
+ --ink:#26322c; --ink-2:#303f37; --ink-3:#3d4c42;
+ --edge:#66725f; --edge-soft:#455347;
+ --bone:#e8e6d8; --bone-dim:#c4c8b7; --ash:#a6b09c;
+ --tangerine:#c6b58b; --ember:#d18d7d; --jade:#a7c1a4; --gold:#d6c493;
+ --bg:var(--ink); --card:var(--ink-2); --fg:var(--bone); --dim:var(--bone-dim);
+ --acc:var(--tangerine); --ok:var(--jade); --red:var(--ember); --blue:#a8c0be;
+ background:var(--ink); color:var(--bone); font:13px/1.7 var(--ui);
+}
+body.studio-tool::after {display:none}
+.studio-tool .bar,.studio-tool header {background:var(--ink-2)}
+.studio-tool h1 {font-family:var(--serif);font-size:19px;letter-spacing:.04em}
+.studio-tool .panel-title::before,.studio-tool .dot {box-shadow:none}
+.studio-tool .panel,.studio-tool .card,.studio-tool .stage,.studio-tool .ro,.studio-tool .tag,.studio-tool .pill,.studio-tool button {border-radius:var(--radius)}
+.studio-tool .readout .v {text-shadow:none}
+.studio-tool .btn:hover,.studio-tool button:hover {background:var(--ink-3);color:var(--bone)}
+.studio-tool .btn.primary,.studio-tool button.pri {background:var(--tangerine);color:var(--ink)}
+.studio-tool .btn.jade {background:var(--jade);color:var(--ink)}
+.studio-tool .stage,.studio-tool #ovl,.studio-tool .ro,.studio-tool .grid3 .cell,.studio-tool input[type=number],.studio-tool select {background:var(--ink)!important;color:var(--bone)!important;border-color:var(--edge)!important}
+.studio-tool button,.studio-tool .btn {border:1px solid var(--edge)}
+.studio-tool input[type=range]::-webkit-slider-thumb {background:var(--tangerine);box-shadow:2px 2px 0 var(--ink)}
+.studio-tool button:focus-visible,.studio-tool select:focus-visible,.studio-tool a:focus-visible,.studio-tool summary:focus-visible {outline:2px solid var(--gold);outline-offset:3px}
+.studio-tool tbody tr:hover {background:var(--ink-3)}
+@media(prefers-reduced-motion:reduce){.studio-tool *{animation:none!important;transition:none!important}}
