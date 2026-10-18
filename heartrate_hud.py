@@ -494,6 +494,9 @@ class HeartHud:
 
     def _menu(self, event) -> None:
         menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label='隐藏桌面悬浮窗（直播继续）', command=self._quit)
+        menu.add_command(label='恢复显示：总控 → 显示悬浮窗', state='disabled')
+        menu.add_separator()
         menu.add_command(label='完成尺寸调整' if self.resize_mode else '调整尺寸（拖右下角）',command=self._toggle_resize_mode)
         if self.size_error:menu.add_command(label='重试保存尺寸',command=self._commit_size)
         menu.add_command(label=f'当前尺寸：{self.w} × {self.h}',state='disabled')
@@ -509,12 +512,14 @@ class HeartHud:
         menu.add_command(label="皮肤与参数（工作台）",
                          command=self._toggle_skin)
         menu.add_command(label=f"置顶：{'开' if self.topmost else '关'}", command=self._toggle_topmost)
-        menu.add_separator()
-        menu.add_command(label="退出", command=self._quit)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
-            menu.grab_release()
+            # Hiding closes this HUD; the menu may already be destroyed too.
+            try:
+                menu.grab_release()
+            except tk.TclError:
+                pass
 
     def _reset(self) -> None:
         try:

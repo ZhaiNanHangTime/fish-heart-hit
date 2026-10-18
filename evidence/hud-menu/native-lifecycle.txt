@@ -1,0 +1,1 @@
+PASS: real Tk child starts once; repeated show reuses PID; hide saves position; parent close exits child with code 0

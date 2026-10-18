@@ -1,3 +1,7 @@
+# 最新更新：悬浮窗右键隐藏
+
+仅重开桌面窗口，后台与OBS来源保持；详见 [HUD_MENU_FIX.md](HUD_MENU_FIX.md)。
+
 # 最新更新：可视化蓝牙设备选择
 
 已正常备份安装，46项后端与32组浏览器流程通过；真机扫描成功，所选手表未广播，真实心率接入未核验。完整说明见 [BLUETOOTH_VERIFICATION.md](BLUETOOTH_VERIFICATION.md)。

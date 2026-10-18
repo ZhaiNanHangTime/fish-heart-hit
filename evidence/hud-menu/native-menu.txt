@@ -1,0 +1,1 @@
+{"native_menu_command_invoked": true, "first_item_is_hide": true, "restore_instruction_visible": true, "position_saved": true, "stream_closed": true, "tk_callback_errors": [], "scope": "isolated Tk HUD only; no service shutdown or personal files"}
