@@ -1,3 +1,7 @@
+# 最新蓝牙功能验证
+
+见 [BLUETOOTH_VERIFICATION.md](BLUETOOTH_VERIFICATION.md)：本轮46后端、32浏览器流程，真实广播扫描与真实心率接入的边界分别记录。下方为此前版本记录。
+
 # 最新视觉改造验证
 
 本轮实际运行：29后端、12原浏览器、12按钮、4视觉专项；详见 [DESIGN_VERIFICATION.md](DESIGN_VERIFICATION.md)。以下保留历史验证记录，108组鱼图对照为此前结果。

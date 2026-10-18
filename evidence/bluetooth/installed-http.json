@@ -1,0 +1,7 @@
+{
+  "installed_resources_match_release": true,
+  "bluetooth_manager_available": true,
+  "local_device_status_route": true,
+  "selected_source_waiting_for_broadcast": true,
+  "private_values_recorded": false
+}

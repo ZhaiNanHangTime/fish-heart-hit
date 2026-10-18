@@ -1,0 +1,16 @@
+{
+  "environment": "actual Windows BLE adapter and existing user-selected heart-rate device; no identities or measured BPM recorded",
+  "real_scan_completed": true,
+  "advertisements_seen": 12,
+  "heart_rate_advertisements_seen": 0,
+  "existing_device_fresh_before_scan": false,
+  "same_selected_device_after_scan": true,
+  "fresh_heart_rate_after_scan": false,
+  "hud_alive": true,
+  "saved_appearance_preserved": true,
+  "other_devices_connected": 0,
+  "appearance_test_writes": 0,
+  "selected_device_seen_in_scan": false,
+  "pre_upgrade_already_waiting_for_advertising": true,
+  "real_device_end_to_end": "NOT_VERIFIED: remembered device did not advertise; pre-upgrade service was also waiting"
+}

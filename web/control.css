@@ -76,3 +76,20 @@ input[type=range]{appearance:none;width:100%;height:20px;background:transparent;
 @media(max-width:850px){.grid,main[data-view=more] .grid{grid-template-columns:minmax(0,1fr)}.preview-panel{position:relative;top:auto}.top{padding:17px 20px;gap:12px}main{padding:20px 18px 40px}.brand{font-size:23px}.logo{width:56px;height:46px}.logo img{width:68px;height:46px}.screen{min-height:240px}}
 @media(max-width:480px){.top{gap:10px;padding:16px}.top .grow{display:none}header .pill{margin-left:0}#shutdown{margin-left:auto}.brand{font-size:22px}main{padding:18px 14px 35px}nav{gap:4px}nav button{flex:1;justify-content:center;padding:10px 6px;font-size:12px;gap:7px}nav svg{width:14px;height:14px}.mode-description{font-size:11px;margin-bottom:18px}.panel{padding:17px}.panel h2{font-size:18px}.screen{min-height:200px}.preview-info{flex-wrap:wrap}.metric{padding:0 6px}.metric small{font-size:10px}.metric strong{font-size:22px}.metric strong.live-number{font-size:32px}.skin-portrait{width:58px;height:39px}.layout-thumb{display:none}.layout-grid button{padding:9px}.baseline-grid div{padding:8px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+/* Local Bluetooth device chooser, shared by every copy of the one-click app. */
+.bluetooth-panel{margin:0 0 23px;background:var(--panel);border:2px solid var(--edge);border-radius:6px;scroll-margin-top:14px}
+.bluetooth-panel>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 18px;font-size:12px;list-style:none;cursor:pointer}
+.bluetooth-panel>summary::-webkit-details-marker{display:none}
+.bluetooth-panel>summary strong{font:700 16px var(--serif);color:var(--fg)}
+.bluetooth-panel>summary strong::before{content:'+';display:inline-block;width:22px;color:var(--green);font-family:var(--mono)}
+.bluetooth-panel[open]>summary{border-bottom:1px solid var(--edge)}
+.bluetooth-panel[open]>summary strong::before{content:'−'}
+.ble-body{padding:0 18px 17px}.ble-toolbar{margin-top:14px}.ble-toolbar button{font-size:12px}
+.ble-devices{max-height:320px;overflow:auto;margin-top:12px}
+.ble-device{display:flex;gap:12px;justify-content:space-between;align-items:center;padding:12px 2px;border-top:1px solid var(--edge)}
+.ble-device>div:first-child{min-width:0;flex:1}.ble-device strong{display:block;font-size:13px;overflow-wrap:anywhere}
+.ble-device small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+.ble-actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.ble-actions button{font-size:12px;padding:5px 12px}
+.ble-current{color:var(--green);font-size:11px}.ble-body .error{color:var(--red)}
+@media(max-width:480px){.bluetooth-panel>summary{align-items:flex-start;padding:12px}.bluetooth-panel>summary strong{font-size:15px;white-space:nowrap}#bleSummary{font-size:11px}.ble-body{padding:0 12px 15px}.ble-device{align-items:flex-start}.ble-actions{max-width:110px}.ble-device small{font-size:10px}}

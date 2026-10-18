@@ -37,6 +37,7 @@ from hr_config import DEFAULT_PARAMS, GROUPS, merge_params
 from hr_baseline import Baseline
 from hr_runtime import RuntimeControl, APP_ID, CONTROL_PROTOCOL, root_id
 from hr_visual import layout as visual_layout, sprite_png, FRAMES
+from hr_devices import DeviceManager
 from bleak import BleakClient, BleakScanner
 
 HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb"
@@ -138,8 +139,8 @@ class Hub:
 
     def start_csv(self, directory: Path) -> Path:
         directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"heart-rate-{datetime.now():%Y%m%d-%H%M%S}.csv"
-        self.csv_file = path.open("w", newline="", encoding="utf-8-sig")
+        path = directory / f"heart-rate-{datetime.now():%Y%m%d-%H%M%S-%f}.csv"
+        self.csv_file = path.open("x", newline="", encoding="utf-8-sig")
         self.csv_writer = csv.writer(self.csv_file)
         self.csv_writer.writerow(["timestamp", "iso_time", "bpm"])
         return path
@@ -302,75 +303,10 @@ async def read_battery(client: BleakClient, hub: Hub) -> None:
 
 async def ble_loop(hub: Hub, address: str | None, stop: asyncio.Event,
                    name: str | None = None, attempts: int = 1) -> None:
-    """Keep the heart-rate subscription alive forever.
-
-    address 为 None（或设备找不到）时会重新扫描，因此不依赖写死的地址，
-    也容忍 macOS 每次连接都换随机地址的行为。
-    """
-    holder = {"addr": address or (None if name else next(iter(load_known_devices()), None))}
-    backoff = 2.0
-    while not stop.is_set():
-        try:
-            addr = holder["addr"]
-            device = await BleakScanner.find_device_by_address(addr, timeout=15.0) if addr else None
-            if device is None:
-                if addr:
-                    log.warning("device not advertising; rescanning in %.0fs", backoff)
-                else:
-                    log.info("no address yet; scanning for a heart-rate broadcaster…")
-                hub.connected = False
-                hub.publish()
-                found = await scan_for_heart_rate(name=name, attempts=attempts)
-                if found is None:
-                    log.warning("no heart-rate device found; retry in %.0fs", backoff)
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * 1.6, 30.0)
-                    continue
-                if found != holder["addr"]:
-                    log.info("using address %s", found)
-                    holder["addr"] = found
-                device = await BleakScanner.find_device_by_address(holder["addr"], timeout=15.0)
-                if device is None:
-                    log.warning("device vanished right after scan; retry in %.0fs", backoff)
-                    await asyncio.sleep(backoff)
-                    backoff = min(backoff * 1.6, 30.0)
-                    continue
-                backoff = 2.0
-            else:
-                async with BleakClient(device, timeout=25.0) as client:
-                    hub.connected = True
-                    backoff = 2.0
-                    log.info("connected to %s", device.address)
-                    remember_device(device.address)
-                    await read_battery(client, hub)
-
-                    def on_data(_sender, data: bytearray) -> None:
-                        try:
-                            hub.set_bpm(parse_bpm(bytes(data)))
-                        except Exception as exc:  # noqa: BLE001
-                            log.debug("bad notification: %s", exc)
-
-                    await client.start_notify(HR_MEASUREMENT, on_data)
-                    log.info("subscribed to heart-rate notifications")
-                    last_battery = time.time()
-                    while client.is_connected and not stop.is_set():
-                        await asyncio.sleep(1.0)
-                        if time.time() - last_battery > 300:
-                            last_battery = time.time()
-                            await read_battery(client, hub)
-                    with contextlib.suppress(Exception):
-                        await client.stop_notify(HR_MEASUREMENT)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("BLE error: %s: %s", type(exc).__name__, exc)
-
-        hub.connected = False
-        hub.publish()
-        if stop.is_set():
-            break
-        log.info("link down; retrying in %.0fs", backoff)
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(stop.wait(), timeout=backoff)
-        backoff = min(backoff * 1.5, 15.0)
+    """The visual manager owns a single selected connection and its reconnects."""
+    if not getattr(hub, 'devices', None):
+        hub.devices = DeviceManager(hub, DEVICES_FILE, parse_bpm, address, name)
+    await hub.devices.run(stop)
 
 
 FALLBACK_PAGE = """<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
@@ -429,6 +365,9 @@ def build_app(hub: Hub, runtime=None) -> web.Application:
 
     async def control_js(_request):
         return web.FileResponse(HERE/"web/control.js")
+
+    async def devices_js(_request):
+        return web.FileResponse(HERE/"web/devices.js")
 
     async def control_css(_request):
         return web.FileResponse(HERE/"web/control.css")
@@ -577,6 +516,24 @@ def build_app(hub: Hub, runtime=None) -> web.Application:
         require_control(request)
         return web.json_response({**runtime.status(), "token":runtime.token},headers={"Cache-Control":"no-store"})
 
+    async def control_devices(request):
+        require_control(request, request.method == 'POST')
+        manager = getattr(hub, 'devices', None)
+        if manager is None:
+            return web.json_response({'available': False, 'error': '请通过新版一键入口重启服务以启用蓝牙管理。'}, status=503)
+        if request.method == 'GET':
+            return web.json_response(manager.status(), headers={'Cache-Control': 'no-store'})
+        if runtime.status().get('stopping'):
+            return web.json_response({'error': '本次运行正在结束。'}, status=409)
+        try:
+            result = await manager.action(await request.json())
+            return web.json_response(result, headers={'Cache-Control': 'no-store'})
+        except (ValueError, TypeError) as exc:
+            return web.json_response({'error': str(exc)}, status=400)
+
+    async def devices_page(request):
+        raise web.HTTPFound('/console#devices')
+
     async def control_hud(request):
         require_control(request,True)
         try:
@@ -649,6 +606,7 @@ def build_app(hub: Hub, runtime=None) -> web.Application:
     app.router.add_get("/monitor", monitor)
     app.router.add_get("/live.js", live_js)
     app.router.add_get("/control.js",control_js)
+    app.router.add_get("/devices.js",devices_js)
     app.router.add_get("/control.css",control_css)
     app.router.add_get("/studio-theme.css",studio_theme)
     app.router.add_get("/params/schema", schema)
@@ -656,6 +614,9 @@ def build_app(hub: Hub, runtime=None) -> web.Application:
     app.router.add_get("/effects", effects)
     app.router.add_get("/tune", tune)
     app.router.add_get("/console", console)
+    app.router.add_get("/devices", devices_page)
+    app.router.add_get("/control/devices", control_devices)
+    app.router.add_post("/control/devices", control_devices)
     app.router.add_get("/test", test_bench)
     app.router.add_get("/theme.css", theme)
     assets_dir = HERE / 'web' / 'assets'
@@ -701,6 +662,14 @@ async def main_async(args: argparse.Namespace) -> None:
             await asyncio.sleep(1.0)
             hub.publish()
 
+    def new_device_session():
+        # Keep different sources out of the same raw CSV; preserve all older files.
+        if not args.no_csv:
+            hub.close_csv()
+            hub.start_csv(Path(args.csv_dir))
+
+    hub.devices = DeviceManager(hub, DEVICES_FILE, parse_bpm, address, args.name,
+                                on_switch=new_device_session)
     runtime = RuntimeControl(HERE, f"http://127.0.0.1:{args.port}",stop,hub.publish)
     runner = web.AppRunner(build_app(hub,runtime), shutdown_timeout=1)
     await runner.setup()
@@ -720,6 +689,7 @@ async def main_async(args: argparse.Namespace) -> None:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks,return_exceptions=True)
+        await hub.devices.close()
         await runtime.close()
         hub.close_csv()
         await runner.cleanup()

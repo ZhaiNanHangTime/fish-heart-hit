@@ -1,0 +1,14 @@
+{
+  "environment": "visible Chrome; synthetic BLE adapter and GATT clients; no actual devices or personal files",
+  "checks": [
+    "device route opens the integrated chooser; scanning lists service-advertised and unadvertised devices; advertiser HTML is rendered as text",
+    "unsupported speaker produces a visible reason and no fake heart rate",
+    "selected unadvertised heart-rate device verifies GATT, subscribes, receives synthetic 78 BPM and is remembered",
+    "scan preserves the active source; switching sources resets baseline and session statistics",
+    "disconnect stays disconnected across page reload; reconnect and forgetting the selected source work",
+    "scan can be stopped; adapter failures are visible and retry recovers",
+    "device command failure remains visible after polling, preserves the list, and allows retry",
+    "390px device controls remain usable with no horizontal overflow or page errors"
+  ],
+  "page_errors": []
+}

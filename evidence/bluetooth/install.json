@@ -1,0 +1,11 @@
+{
+  "installed": true,
+  "target": "G:\\downloads\\heart-rate",
+  "backup": "G:\\downloads\\heart-rate-backups\\before-bluetooth-chooser-20261017-231442",
+  "changed_code_files": 5,
+  "private_files_verified": 43,
+  "private_hashes_match": true,
+  "graceful_restart": true,
+  "oneclick_entry_invoked": true,
+  "current_window_ui_verified": false
+}

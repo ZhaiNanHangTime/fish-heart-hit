@@ -4,6 +4,7 @@ import tempfile
 import atexit
 import asyncio
 import time
+import os
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import heartrate_live as live
@@ -17,6 +18,15 @@ hub = TestHub(None, None, 12, 600)
 hub.connected = True
 hub.baseline.value = 72.
 hub.base_bpm = 72.
+bluetooth_fixture = os.environ.get('FISH_TEST_BLUETOOTH') == '1'
+if bluetooth_fixture:
+    from _ble_fakes import Radio
+    from hr_devices import DeviceManager
+    radio = Radio()
+    radio.auto_notify = True
+    hub.devices = DeviceManager(hub, Path(test_dir.name)/'devices.json', live.parse_bpm,
+                                scanner=radio, client_factory=radio.client)
+    hub.devices._clear_reading()
 class TestRuntime:
     token='synthetic-control-token'
     def __init__(self): self.visible=False;self.closing=False;self.editing=False;self.panel={'id':0,'target':'hud-size'};self.session_id='fixture-session'
@@ -42,8 +52,20 @@ async def track_test_streams(request,handler):
 app.middlewares.append(track_test_streams)
 
 async def control(req):
-    global reading,silent
+    global reading,silent,radio
     data = await req.json()
+    if bluetooth_fixture:
+        if data.get('reset_devices'):
+            await hub.devices.close()
+            (Path(test_dir.name)/'devices.json').unlink(missing_ok=True)
+            radio = Radio()
+            radio.auto_notify = True
+            hub.devices = DeviceManager(hub, Path(test_dir.name)/'devices.json', live.parse_bpm,
+                                        scanner=radio, client_factory=radio.client)
+            hub.reset_session()
+            hub.devices._clear_reading()
+        if 'scan_delay' in data: radio.scan_delay = max(.01, min(10, float(data['scan_delay'])))
+        if 'scan_error' in data: radio.scan_error = data['scan_error'] is True
     if data.get('new_session'):
         runtime.session_id+='-new';runtime.closing=False;runtime.visible=False;runtime.editing=False;runtime.panel={'id':0,'target':'hud-size'}
     if data.get('disconnect_streams'):
@@ -54,7 +76,7 @@ async def control(req):
         for t in range(601): hub.baseline.add(time.time()-600+t,data['base'])
         hub.base_bpm = hub.baseline.value
     reading = data.get('bpm', 72)
-    hub.connected = data.get('connected', True)
+    hub.connected = data.get('connected', False if bluetooth_fixture else True)
     if reading is not None:
         hub.set_bpm(reading)
     else:
@@ -68,7 +90,7 @@ async def loop(app):
             if silent:
                 await asyncio.sleep(1)
                 continue
-            if reading is not None and hub.connected:
+            if not bluetooth_fixture and reading is not None and hub.connected:
                 hub.set_bpm(reading)
             else:
                 hub.publish()
@@ -83,4 +105,8 @@ async def loop(app):
 
 app.router.add_post('/__test', control)
 app.cleanup_ctx.append(loop)
-web.run_app(app, host='127.0.0.1', port=18766, print=None)
+async def close_devices(app):
+    if bluetooth_fixture:
+        await hub.devices.close()
+app.on_cleanup.append(close_devices)
+web.run_app(app, host='127.0.0.1', port=int(os.environ.get('FISH_TEST_PORT', '18766')), print=None)

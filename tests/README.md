@@ -53,3 +53,11 @@ fixture只监听127.0.0.1:18766；其控制入口 `/__test` 仅存在于此测�
 素材宽度对照扩为108组，含75%/100%/125%；验证只改横向、预览隔离、应用保存、OBS同步及恢复原始比例。
 
 前端自查：synthetic_server.py启动后执行check_control_actions.cjs，覆盖实际点击、遮挡、重连/新会话、非JSON失败等；复制/校准使用替身，避免系统剪贴板或基准变动。
+
+## 蓝牙设备选择
+
+`python -m unittest discover -s tests -p test_devices.py -v` 使用内存扫描器与GATT替身验证设备管理，不访问实际蓝牙。
+
+PowerShell中设置 `$env:FISH_TEST_BLUETOOTH='1'; $env:FISH_TEST_PORT='18767'` 后启动 `python tests/synthetic_server.py`，再运行 `node tests/check_devices.cjs`（需要开发环境Playwright与可见Chrome）。生产服务没有/__test接口。测试覆盖扫描/停止、无广播UUID但可订阅的设备、故障与重试、断开/忘记、切换统计重置、恶意设备名作为纯文本、390px界面；不连接真实周边设备。
+
+原浏览器与按钮回归使用默认18766端口，不开启FISH_TEST_BLUETOOTH。每个测试服务用临时文件，不读取现用个人配置。
