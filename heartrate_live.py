@@ -29,15 +29,15 @@ import json
 import logging
 import time
 from collections import deque
-from datetime import datetime
 from pathlib import Path
 
 from aiohttp import web
 from hr_config import DEFAULT_PARAMS, GROUPS, merge_params
 from hr_baseline import Baseline
 from hr_runtime import RuntimeControl, APP_ID, CONTROL_PROTOCOL, root_id
-from hr_visual import layout as visual_layout, sprite_png, FRAMES
+from hr_visual import layout as visual_layout, sprite_png, FRAMES, trace_series
 from hr_devices import DeviceManager
+from hr_recording import ActivityRecorder, ACTIVITIES, describe_log
 from bleak import BleakClient, BleakScanner
 
 HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb"
@@ -132,25 +132,20 @@ class Hub:
         self.base_bpm: float | None = None  # rolling P25, tau=60s
 
         self.queues: set[asyncio.Queue] = set()
-        self.csv_writer = None
-        self.csv_file = None
+        self.recording = ActivityRecorder()
+        self.log_directory = HERE / 'logs'
 
     # ---------- data intake ----------
 
     def start_csv(self, directory: Path) -> Path:
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"heart-rate-{datetime.now():%Y%m%d-%H%M%S-%f}.csv"
-        self.csv_file = path.open("x", newline="", encoding="utf-8-sig")
-        self.csv_writer = csv.writer(self.csv_file)
-        self.csv_writer.writerow(["timestamp", "iso_time", "bpm"])
-        return path
+        self.log_directory = Path(directory)
+        return self.recording.start(directory, self.params)
 
     def close_csv(self) -> None:
-        if self.csv_file:
-            with contextlib.suppress(Exception):
-                self.csv_file.close()
-            self.csv_file = None
-            self.csv_writer = None
+        try:
+            self.recording.close()
+        except OSError:
+            log.exception('记录结束信息写入失败，已有CSV保留')
 
     def set_bpm(self, bpm: int) -> None:
         if not 20 <= bpm <= 250:  # ignore obvious garbage
@@ -165,10 +160,7 @@ class Hub:
         self.total += bpm
         self.minimum = bpm if self.minimum is None else min(self.minimum, bpm)
         self.maximum = bpm if self.maximum is None else max(self.maximum, bpm)
-        if self.csv_writer:
-            with contextlib.suppress(Exception):
-                self.csv_writer.writerow([f"{now:.3f}", datetime.now().isoformat(timespec="seconds"), bpm])
-                self.csv_file.flush()
+        self.recording.write(now, bpm, self.base_bpm, self.params_version)
         self.publish()
 
     def set_battery(self, level: int) -> None:
@@ -271,8 +263,11 @@ class Hub:
             "params": dict(self.params),
             "params_version": self.params_version,
             "revision": self.revision,
+            "recording": self.recording.status(),
             "baseline": self.baseline.status(time.time()),
             "history": {"samples": [[round(t - self.session_started, 2), v] for t, v in self.history]},
+            "trace": trace_series([[round(t-self.session_started, 2),v] for t,v in self.history],
+                                  self.params['traceSeconds']),
             "visual_stage": self.visual_stage,
             "runtime": self.runtime.status() if self.runtime else {"available":False,"hud":False},
             "recent": self.recent_stats(),
@@ -403,23 +398,29 @@ def build_app(hub: Hub, runtime=None) -> web.Application:
 
     async def logs_list(_request: web.Request) -> web.Response:
         """列出历史心率记录。"""
-        logs_dir = HERE / "logs"
+        activity = _request.query.get('activity', 'all')
+        if activity != 'all' and activity not in ACTIVITIES:
+            return web.json_response({'error': '无效记录类型'}, status=400)
+        logs_dir = hub.log_directory
         items = []
-        for f in sorted(logs_dir.glob("*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)[:60]:
+        for f in sorted(logs_dir.glob("*.csv"), key=lambda p: p.stat().st_mtime, reverse=True):
             try:
-                with f.open(encoding="utf-8-sig") as fh:
-                    n = max(0, sum(1 for _ in fh) - 1)
+                info = describe_log(f)
             except Exception:  # noqa: BLE001
-                n = 0
-            items.append({"name": f.name, "samples": n,
+                info = {'samples': 0, 'activity': 'unmarked', 'game': ''}
+            if activity != 'all' and info['activity'] != activity:
+                continue
+            items.append({"name": f.name, **info,
                           "kb": round(f.stat().st_size / 1024, 1),
                           "mtime": f.stat().st_mtime})
+            if len(items) >= 60:
+                break
         return web.json_response(items)
 
     async def replay(request: web.Request) -> web.Response:
         """对某份真实记录跑一遍当前参数，返回三个验收指标。"""
         name = request.query.get("file", "")
-        logs_dir = (HERE / "logs").resolve()
+        logs_dir = hub.log_directory.resolve()
         try:
             path = (logs_dir / name).resolve()
             path.relative_to(logs_dir)          # 防目录穿越
@@ -515,6 +516,27 @@ def build_app(hub: Hub, runtime=None) -> web.Application:
     async def control_get(request):
         require_control(request)
         return web.json_response({**runtime.status(), "token":runtime.token},headers={"Cache-Control":"no-store"})
+
+    async def control_recording(request):
+        require_control(request, request.method == 'POST')
+        if request.method == 'GET':
+            return web.json_response(hub.recording.status(), headers={'Cache-Control': 'no-store'})
+        if runtime.status().get('stopping'):
+            return web.json_response({'error': '本次运行正在结束。'}, status=409)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict) or not isinstance(body.get('activity'), str):
+                raise ValueError('无效记录操作')
+            result = hub.recording.change(body['activity'], body.get('game', ''), hub.params,
+                                          body.get('expected_segment'))
+            hub.publish()
+            return web.json_response(result)
+        except (ValueError, TypeError) as exc:
+            return web.json_response({'error': str(exc)}, status=400)
+        except RuntimeError as exc:
+            return web.json_response({'error': str(exc)}, status=409)
+        except OSError:
+            return web.json_response({'error': '无法创建或结束记录，请检查磁盘空间和目录权限；未切换标签。'}, status=503)
 
     async def control_devices(request):
         require_control(request, request.method == 'POST')
@@ -640,6 +662,8 @@ def build_app(hub: Hub, runtime=None) -> web.Application:
     app.router.add_get('/render/layout',render_layout)
     app.router.add_get('/render/xianyu/{frame}.png',render_sprite)
     app.router.add_get("/control",control_get)
+    app.router.add_get('/control/recording', control_recording)
+    app.router.add_post('/control/recording', control_recording)
     app.router.add_post("/control/hud",control_hud)
     app.router.add_post("/control/shutdown",control_shutdown)
     app.router.add_post('/control/panel',control_panel)
@@ -665,8 +689,8 @@ async def main_async(args: argparse.Namespace) -> None:
     def new_device_session():
         # Keep different sources out of the same raw CSV; preserve all older files.
         if not args.no_csv:
-            hub.close_csv()
-            hub.start_csv(Path(args.csv_dir))
+            # A different wearer's data must not inherit an active game label.
+            hub.recording._rotate('unmarked', '', hub.params, 'device_changed')
 
     hub.devices = DeviceManager(hub, DEVICES_FILE, parse_bpm, address, args.name,
                                 on_switch=new_device_session)

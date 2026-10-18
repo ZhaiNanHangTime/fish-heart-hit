@@ -10,6 +10,7 @@ DEFAULT_PARAMS = {
     "fishScale": 1.0, "fishWidth": 1.5, "fxWarmth": True, "fxKick": True,
     "warn": 90, "danger": 100, "viewWidth":520,"viewHeight":170,
     "traceLayout": "overlay",
+    "traceSeconds": 180,
     "hudWidth": 240, "hudHeight": 104,
 }
 GROUPS = {
@@ -17,7 +18,7 @@ GROUPS = {
               "attack", "release", "redHold", "redDrop"],
     "effect": ["burstRise", "burstAbove", "burstWindow", "burstCooldown",
                "fishScale", "fishWidth", "fxWarmth", "fxKick"],
-    "device": ["viewWidth","viewHeight","hudWidth","hudHeight","skin", "traceLayout", "offlineAfter", "warn", "danger"],
+    "device": ["viewWidth","viewHeight","hudWidth","hudHeight","skin", "traceLayout", "traceSeconds", "offlineAfter", "warn", "danger"],
 }
 LIMITS = {
     "minGap": (1, 80), "maxGap": (1, 100), "p90Offset": (0, 30),
@@ -28,6 +29,7 @@ LIMITS = {
     "viewWidth":(300,1200), "viewHeight":(90,450), "fishScale": (0.5, 4.0), "warn": (30, 249), "danger": (31, 250),
     "hudWidth": (160, 1920), "hudHeight": (64, 1080),
     "fishWidth": (0.5, 1.5),
+    "traceSeconds": (30, 600),
 }
 
 def merge_params(base, values):

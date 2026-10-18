@@ -156,8 +156,10 @@
 </div>
 
 <details>
-  <summary>历史记录 · 点击回放验收</summary>
+  <summary>历史记录 · 按游戏时段回放</summary>
   <div class="drawer-body">
+    <label class="hint" for="logActivity">记录类型：</label><select id="logActivity"><option value="all">全部</option><option value="game">游戏</option><option value="non_game">非游戏</option><option value="unmarked">未标注（含旧记录）</option></select><button class="btn ghost" id="refreshLogs">刷新列表</button>
+    <p class="hint">每次标记切换独立成段，避免回放混入日常数据。旧记录没有标签，均归入未标注。以下指标为算法回放估计，不能代替人工判断真实误报。</p>
     <table>
       <thead><tr>
         <th>记录</th><th class="num">样本</th><th class="num">时长</th>
@@ -354,21 +356,31 @@ async function resetStats() {
   try { await fetch('/reset', { method: 'POST' }); refresh(); } catch (_) {}
 }
 
+let logsRequest=0;
 async function loadLogs() {
-  const tb = $('logs');
+  const tb=$('logs'),request=++logsRequest;
+  tb.replaceChildren();
   try {
-    const list = await (await fetch('/logs')).json();
-    if (!list.length) { tb.innerHTML = '<tr><td colspan="7" class="hint">还没有记录</td></tr>'; return; }
-    tb.innerHTML = list.map((it) => `
-      <tr class="pick" data-name="${it.name}">
-        <td class="num">${fmtTime(it.mtime)}</td><td class="num">${it.samples}</td>
-        <td class="num" data-role="dur">—</td><td class="num" data-role="red">—</td>
-        <td class="num" data-role="fr">—</td><td class="num" data-role="burst">—</td>
-        <td data-role="verdict" class="hint">点击回放</td></tr>`).join('');
-    tb.querySelectorAll('tr.pick').forEach((tr) =>
-      tr.addEventListener('click', () => replay(tr)));
-  } catch (_) { tb.innerHTML = '<tr><td colspan="7" class="hint">读取失败</td></tr>'; }
+    const response=await fetch('/logs?activity='+encodeURIComponent($('logActivity').value));
+    const list=await response.json();
+    if(request!==logsRequest)return;
+    if(!response.ok)throw Error(list.error||'读取失败');
+    if(!list.length){tb.textContent='该类型暂无记录';return;}
+    const labels={game:'游戏',non_game:'非游戏',unmarked:'未标注'};
+    for(const it of list){
+      const tr=document.createElement('tr');tr.className='pick';tr.dataset.name=it.name;
+      for(const value of [fmtTime(it.mtime)+' · '+(labels[it.activity]||'未标注')+(it.game?' · '+it.game:''),it.samples]){
+        const td=document.createElement('td');td.className='num';td.textContent=value;tr.append(td);
+      }
+      for(const role of ['dur','red','fr','burst','verdict']){
+        const td=document.createElement('td');td.dataset.role=role;td.className=role==='verdict'?'hint':'num';td.textContent=role==='verdict'?'点击回放':'—';tr.append(td);
+      }
+      tr.addEventListener('click',()=>replay(tr));tb.append(tr);
+    }
+  }catch(e){if(request===logsRequest)tb.textContent='读取失败：'+e.message;}
 }
+$('logActivity').addEventListener('change',()=>{ $('replayNote').textContent='';loadLogs(); });
+$('refreshLogs').addEventListener('click',loadLogs);
 
 async function replay(tr) {
   const name = tr.dataset.name;
@@ -387,10 +399,10 @@ async function replay(tr) {
     else if (r.red_per10 <= 3)  { v = '甜点'; c = 'good'; }
     else                        { v = '红过头 → 提高 minGap'; c = 'mid'; }
     cell('verdict').innerHTML = `<span class="tag ${c}">${v}</span>`;
-    $('replayNote').innerHTML =
-      `<b>${r.file}</b> · ${r.samples} 样本 / ${r.minutes} 分钟 · 心率 ${r.min}/${r.avg}/${r.max}` +
-      ` · 锚点 B=${r.anchorB} R=${r.anchorR} · 满红 <b>${r.red}</b> 次、假红 <b>${r.false_red}</b> 次、` +
-      `特效 <b>${r.burst}</b> 次`;
+    $('replayNote').textContent =
+      `${r.file} · ${r.samples} 样本 / ${r.minutes} 分钟 · 心率 ${r.min}/${r.avg}/${r.max}` +
+      ` · 锚点 B=${r.anchorB} R=${r.anchorR} · 满红 ${r.red} 次、假红估计 ${r.false_red} 次、` +
+      `特效 ${r.burst} 次`;
   } catch (e) { $('replayNote').textContent = '回放出错：' + e; }
 }
 

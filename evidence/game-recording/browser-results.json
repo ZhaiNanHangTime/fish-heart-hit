@@ -1,0 +1,10 @@
+{
+  "environment": "visible Chrome; isolated synthetic service with temporary CSVs; no personal data or real BLE",
+  "checks": [
+    "actual start button; SSE state shared by two consoles; reload preserves the same active segment; game name rendered as text",
+    "actual end button saves game data separately; history filter selects game-only files; replay works; parameters unchanged; hostile name does not execute",
+    "failed write is visible and leaves current label unchanged with retry available",
+    "390px controls work without overflow; explicitly return to unmarked; stream loss disables mutations and shows unknown state"
+  ],
+  "page_errors": []
+}

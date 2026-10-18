@@ -1,0 +1,10 @@
+{
+  "environment": "visible Chrome + actual Tk; isolated synthetic data, no real BLE",
+  "cases": 16,
+  "normalized_series_and_preview_fallback": "exact match",
+  "actual_native_and_browser_curve_coordinates": "exact match",
+  "stroke_width_and_endpoint_dot": "exact match",
+  "draft_isolated_until_apply": true,
+  "saved_window_reaches_OBS": true,
+  "page_errors": []
+}

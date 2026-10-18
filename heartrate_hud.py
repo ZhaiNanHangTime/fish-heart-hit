@@ -33,7 +33,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from hr_config import DEFAULT_PARAMS, LIMITS
 from hr_client import SnapshotClient
-from hr_visual import layout as visual_layout, sprite_png
+from hr_visual import layout as visual_layout, sprite_png, trace_series
 
 HERE = Path(__file__).resolve().parent
 SETTINGS = HERE / "hud.json"
@@ -276,6 +276,8 @@ class HeartHud:
         u = self.fish_unit
 
         # 心率线（最底层）
+        self.trace_shadow = self.canvas.create_line(0, 0, 0, 0, fill='#a01f18',
+                                             width=3, capstyle='butt', joinstyle='miter')
         self.trace = self.canvas.create_line(0, 0, 0, 0, fill=TRACE,
                                              width=max(3, self.scale + 1),
                                              capstyle='butt', joinstyle='miter')
@@ -334,8 +336,9 @@ class HeartHud:
         self.ghost_float = 0.0
 
         # 图层顺序：线在最底层，鱼身盖住它；数字仍在最上层
-        self.canvas.tag_lower(self.trace)
         self.canvas.tag_lower(self.trace_dot)
+        self.canvas.tag_lower(self.trace)
+        self.canvas.tag_lower(self.trace_shadow)
         for pos in self.digit_items:
             for _r, _c, shadow, main in pos:
                 self.canvas.tag_raise(shadow)
@@ -858,48 +861,26 @@ class HeartHud:
                    self.w - self.pad - self.dot_r * 2, self.pad, self.dot_r * 2)
 
     def _draw_trace(self) -> None:
-        s = self.scale
-        x0, x1 = 0, self.w
-        cy = self.center_y
-        samples = self.history
-        if not samples or len(samples) < 2:
-            self.canvas.coords(self.trace, x0, cy, x0, cy)
+        seconds = P.get('traceSeconds', 180)
+        series = self.state.get('trace')
+        if not series or series.get('seconds') != seconds:
+            series = trace_series(self.history, seconds)
+        normalized = series['points']
+        if len(normalized) < 2:
+            for item in (self.trace_shadow, self.trace):
+                self.canvas.coords(item, 1, self.center_y, 1, self.center_y)
+                self._hide(item)
             self._hide(self.trace_dot)
             return
-
-        vals = [v for _t, v in samples]
-        # 3 点移动平均压毛刺，然后让曲线占满整个高度（不留死区）
-        n = len(vals)
-        smooth = [(vals[max(0, i - 1)] + vals[i] + vals[min(n - 1, i + 1)]) / 3 for i in range(n)]
-        mid = (min(smooth) + max(smooth)) / 2
-        span = max(3.0, max(smooth) - min(smooth))
-        half = span / 2
-        total = samples[-1][0] or 1
-        t0 = max(0.0, total - 90.0)
-        cyc = max(15.0, (total - t0) or 90.0)
-        amp = self.amp
-
-        step = max(1, len(samples) // 80)
-        pts = []
-        for i in range(0, len(samples), step):
-            t = samples[i][0]
-            if t < t0:
-                continue
-            px_ = x0 + ((t - t0) / cyc) * (x1 - x0)
-            py_ = cy - ((smooth[i] - mid) / half) * amp
-            pts.extend((px_, py_))
-        if len(pts) < 4:
-            self.canvas.coords(self.trace, x0, cy, x0, cy)
-            self._hide(self.trace_dot)
-            return
-
-        self.canvas.coords(self.trace, *pts)
-        self.canvas.itemconfig(self.trace, fill=TRACE)
-        # 最右端的心跳亮点（用平滑后的值）
-        lx = x0 + ((samples[-1][0] - t0) / cyc) * (x1 - x0)
-        ly = cy - ((smooth[-1] - mid) / half) * amp
-        d = max(3, s * 1.4)
-        self._show(self.trace_dot, '#ffffff', lx - d / 2, ly - d / 2, d)
+        points = [(1+x*(self.w-2), self.center_y-y*self.amp) for x,y in normalized]
+        coords = [value for point in points for value in point]
+        for item, width in [(self.trace_shadow, max(3, math.floor(self.h*.055+.5))),
+                            (self.trace, max(2, math.floor(self.h*.036+.5)))]:
+            self.canvas.coords(item, *coords)
+            self.canvas.itemconfig(item, width=width, state='normal')
+        x,y = points[-1]
+        dot = max(2, math.floor(self.h*.028+.5))
+        self._show(self.trace_dot, '#ffffff', x-dot, y-dot, dot*2)
 
     def _update_algo(self, bpm, dt: float) -> None:
         """冻结版算法：锚点慢跟随 → 强度 Attack/Release → 满红迟滞 → 突发特效。"""

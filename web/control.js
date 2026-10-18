@@ -1,10 +1,36 @@
 'use strict';
 const $=id=>document.getElementById(id), preview=$('preview');
 const FRAMES={ghost:'幽灵',fish:'原版咸鱼',idle:'冷静',alert_low:'好奇',alert_mid:'专注',tense:'紧张',high:'慌张',charge:'蓄力',burst:'突刺',recover:'收招'};
-const fields=['skin','fishScale','fishWidth','fxWarmth','fxKick','viewWidth','viewHeight','traceLayout','hudWidth','hudHeight'];
+const fields=['skin','fishScale','fishWidth','fxWarmth','fxKick','viewWidth','viewHeight','traceLayout','traceSeconds','hudWidth','hudHeight'];
 let originalSize=false,lastPanelRequest=0,selectedTool='/monitor?noiframe=1',hudEditBusy=false,toastTimer=null,runtimeSession=null,previewState=null;
 let previewTarget=location.hash==='#hud-size'?'hud':'obs';
 let draft={},saved={},dirty=new Set(),snapshot={},ready=false,mode='live',forcedFrame=null,token=null,ramp=null,hudBusy=false,ending=false,connected=false,lastSeen=0,saving=false;
+let recordingBusy=false;
+function updateRecording(){
+ const r=snapshot.recording,available=connected&&!ending&&!!snapshot.runtime?.available&&!!r?.available&&!recordingBusy;
+ const game=r?.activity==='game',labels={unmarked:'未标注',game:'游戏记录中',non_game:'非游戏记录中'};
+ $('recordingStart').disabled=!available||game;
+ $('recordingEnd').disabled=!available||r?.activity==='non_game';
+ $('recordingUnknown').disabled=!available||r?.activity==='unmarked';
+ $('gameName').disabled=!available||game;
+ $('recordingEnd').textContent=game?'结束游戏记录':'标为非游戏';
+ $('recordingState').textContent=!connected?'状态未知':r?.error||(!r?.available?'未开启CSV记录':labels[r.activity]||'未标注');
+ $('recordingState').classList.toggle('recording-on',!!game);
+ const seconds=Math.max(0,Math.floor(Date.now()/1000-(r?.started_at||Date.now()/1000)));
+ $('recordingDetail').textContent=r?.active?`${game?(r.game||'未填写游戏名')+' · ':''}${Math.floor(seconds/60)}分${seconds%60}秒 · ${r.samples} 个有效心率样本`:'通过一键入口启动服务后，可在这里标记游戏时段。';
+ $('recordingFile').textContent=r?.file?'当前文件：'+r.file:'';
+}
+async function markRecording(activity){
+ recordingBusy=true;updateRecording();
+ try{
+  snapshot.recording=await control('recording',{activity,game:activity==='game'?$('gameName').value:'',expected_segment:snapshot.recording?.segment_id});
+  status(activity==='game'?'已开始游戏记录；结束游戏时请点“结束游戏记录”。':activity==='non_game'?'已切换为非游戏记录，游戏文件已独立保存。':'后续记录改为未标注；已保存的标签不变。','success');
+ }catch(e){status(e.message,'error')}
+ finally{recordingBusy=false;updateRecording()}
+}
+$('recordingStart').addEventListener('click',()=>markRecording('game'));
+$('recordingEnd').addEventListener('click',()=>markRecording('non_game'));
+$('recordingUnknown').addEventListener('click',()=>markRecording('unmarked'));
 function status(text,type=''){
  $('saveStatus').textContent=text;$('saveStatus').className='status '+type;
  $('feedback').textContent=text;$('feedback').className='feedback '+type;$('feedback').hidden=false;
@@ -14,6 +40,7 @@ function renderAvailability(){
  const blocked=saving||!connected||ending||!dirty.size;
  for(const id of ['save','applyHudSize','applyPreview'])$(id).disabled=blocked;
  updateRuntime(snapshot.runtime);
+ updateRecording();
 }
 
 function renderSettings(){
@@ -22,6 +49,7 @@ function renderSettings(){
  document.querySelectorAll('[data-fish-width]').forEach(el=>el.setAttribute('aria-pressed',String(Number(el.dataset.fishWidth)===(draft.fishWidth??1.5))));
  $('fishScale').value=Math.round((draft.fishScale??1)*100);$('fishScaleText').textContent=$('fishScale').value+'%';
  $('fishWidth').value=Math.round((draft.fishWidth??1.5)*100);$('fishWidthText').textContent=$('fishWidth').value+'%';
+ $('traceSeconds').value=String(draft.traceSeconds??180);
  $('xianyuEffects').hidden=draft.skin!=='xianyu';$('poseControls').hidden=draft.skin!=='xianyu';
  $('warmth').checked=draft.fxWarmth!==false;$('kick').checked=draft.fxKick!==false;
  $('resolution').value=(draft.viewWidth||520)+','+(draft.viewHeight||170);
@@ -76,6 +104,7 @@ function setMode(next){
  if(preview.getAttribute('src')!==source){ready=false;previewState=null;$('showBpm').textContent='—';$('showFrame').textContent='加载中…';$('showHeat').textContent='—';$('fitNotice').textContent='正在加载预览…';preview.src=source;}
  $('previewKind').textContent=(previewTarget==='hud'?'桌面 · ':'OBS · ')+(next==='demo'?'模拟预览':'真实心率');
  $('simulation').hidden=next!=='demo';$('tools').hidden=next!=='more';$('outputControls').hidden=next!=='live';
+ $('recordingPanel').hidden=next!=='live';
  $('appearance').hidden=next==='more';$('baselinePanel').hidden=next==='more';
  $('workspace').hidden=false;document.querySelector('main').dataset.view=next;
  requestAnimationFrame(fitPreview);
@@ -120,6 +149,7 @@ async function control(path,body={},retried=false){
 preview.addEventListener('load',()=>{ready=true;transmit()});
 document.querySelectorAll('[data-skin]').forEach(el=>el.addEventListener('click',()=>change('skin',el.dataset.skin)));
 document.querySelectorAll('[data-layout]').forEach(el=>el.addEventListener('click',()=>change('traceLayout',el.dataset.layout)));
+$('traceSeconds').addEventListener('change',()=>change('traceSeconds',Number($('traceSeconds').value)));
 document.querySelectorAll('[data-preview-target]').forEach(el=>el.addEventListener('click',()=>setPreviewTarget(el.dataset.previewTarget)));
 for(const key of ['hudWidth','hudHeight'])$(key).addEventListener('input',()=>{const value=Number($(key).value);setPreviewTarget('hud');change(key,value)});
 document.querySelectorAll('[data-hud-size]').forEach(el=>el.addEventListener('click',()=>{

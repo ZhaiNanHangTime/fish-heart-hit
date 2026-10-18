@@ -17,6 +17,35 @@ FRAMES = ('idle','alert_low','alert_mid','tense','high','charge','burst','recove
 def pixel(value):
     return math.floor(value+.5)
 
+
+def trace_series(samples, seconds=180):
+    """Clip by time before smoothing/scaling; normalize once for both outputs.
+
+    Downsampling is limited to the visible portion and preserves its extrema
+    and endpoints. Old outliers never flatten the current trend.
+    """
+    if not samples:
+        return {'seconds': seconds, 'points': [], 'samples': 0}
+    end = samples[-1][0]
+    start = max(0, end-seconds)
+    visible = [(t, v) for t, v in samples if t >= start]
+    if len(visible) < 2:
+        return {'seconds': seconds, 'points': [], 'samples': len(visible)}
+    values = [v for t, v in visible]
+    n = len(values)
+    smooth = [(values[max(0,i-1)]+values[i]+values[min(n-1,i+1)])/3 for i in range(n)]
+    low, high = min(smooth), max(smooth)
+    mid, half = (low+high)/2, max(3, high-low)/2
+    duration = max(15, end-start)
+    indices = {0, n-1}
+    step = max(1, math.ceil(n/300))
+    for first in range(0,n,step):
+        bucket = range(first,min(n,first+step))
+        indices.add(min(bucket,key=lambda i:smooth[i]))
+        indices.add(max(bucket,key=lambda i:smooth[i]))
+    points = [[(visible[i][0]-start)/duration, (smooth[i]-mid)/half] for i in sorted(indices)]
+    return {'seconds': seconds, 'points': points, 'samples': n}
+
 def layout(width, height, params, target='hud'):
     w,h=pixel(width),pixel(height)
     if not 160<=w<=3840 or not 60<=h<=2160 or target not in ('hud','obs'):

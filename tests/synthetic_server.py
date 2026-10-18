@@ -15,6 +15,9 @@ live.PARAMS_FILE = Path(test_dir.name) / 'params.json'
 class TestHub(live.Hub):
     def snapshot(self): return {**super().snapshot(),'synthetic':True}
 hub = TestHub(None, None, 12, 600)
+hub.log_directory = Path(test_dir.name)/'logs'
+if os.environ.get('FISH_TEST_RECORDING') == '1':
+    hub.start_csv(hub.log_directory)
 hub.connected = True
 hub.baseline.value = 72.
 hub.base_bpm = 72.
@@ -106,6 +109,7 @@ async def loop(app):
 app.router.add_post('/__test', control)
 app.cleanup_ctx.append(loop)
 async def close_devices(app):
+    hub.close_csv()
     if bluetooth_fixture:
         await hub.devices.close()
 app.on_cleanup.append(close_devices)

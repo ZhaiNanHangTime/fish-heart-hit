@@ -1,0 +1,18 @@
+{
+  "checks": [
+    "demo tab brings actual uncovered controls into view; BPM, pose, target switch, ramp, stop and burst work without changing live parameters",
+    "more tab immediately opens history; all embedded tools work; leaving unloads them; keyboard tab navigation works",
+    "390px narrow viewport: tab click scrolls the requested controls into view and actual clicks are not blocked",
+    "stale control token after a service restart is refreshed once and HUD operation succeeds",
+    "border control disables during pending requests and does not submit a duplicate on rapid clicks",
+    "copy action shows success or a visible manual-copy fallback using an isolated clipboard stub",
+    "calibration rejection is shown visibly and its button recovers, with the calibration response stubbed instead of modifying any baseline",
+    "connection loss disables every mutating control consistently; drafts survive and controls recover on reconnect",
+    "non-JSON save failure has visible feedback, preserves the draft and allows a successful retry",
+    "without sensor readings or fixture publishes, real SSE heartbeats keep service controls available for more than six seconds",
+    "end-session feedback appears and all mutating controls stay disabled while ending",
+    "a new backend session revives an already-open ended console and clears its stale token and panel counter"
+  ],
+  "page_errors": [],
+  "environment": "isolated synthetic service; real visible Chrome clicks, no live service settings or system clipboard modified"
+}

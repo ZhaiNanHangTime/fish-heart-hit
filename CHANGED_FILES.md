@@ -1,24 +1,41 @@
 # 本轮改动文件
 
-比较对象：上一轮已交付完整蓝牙总控包（SHA256 `31381e4add96eef4f65fd2860252148db8b20d3ccfdf27c0d8ad2ef14415fe8f`）。原Git基线7c0e1be的A~I合并记录仍保留在CHANGELOG后半部分。
+基线：`0795d81`。本轮包含游戏分段记录与悬浮窗/预览曲线同步，功能及验证结果见 GAME_RECORDING.md 与 TRACE_SYNC.md。
 
 ## 修改
 
+- `CHANGED_FILES.md`
 - `CHANGELOG.md`
-- `heartrate_hud.py`
 - `INSTALL_REPORT.md`
+- `MANIFEST.sha256`
 - `README.md`
+- `heartrate_hud.py`
+- `heartrate_live.py`
+- `hr_config.py`
+- `hr_visual.py`
+- `tests/synthetic_server.py`
+- `web/console.html`
+- `web/control.css`
+- `web/control.js`
+- `web/monitor.html`
+- `web/pixel.html`
 
 ## 新增
 
-- `evidence/hud-menu/install.json`
-- `evidence/hud-menu/native-lifecycle.txt`
-- `evidence/hud-menu/native-menu.txt`
-- `HUD_MENU_FIX.md`
-- `tests/check_hud_menu.py`
+- `GAME_RECORDING.md`
+- `TRACE_SYNC.md`
+- `evidence/game-recording/browser-results.json`
+- `evidence/game-recording/control-actions-results.json`
+- `evidence/game-recording/unit-tests.txt`
+- `evidence/trace-sync/browser-trace.json`
+- `evidence/trace-sync/control-actions-results.json`
+- `evidence/trace-sync/native-trace.txt`
+- `evidence/trace-sync/unit-tests.txt`
+- `hr_recording.py`
+- `tests/check_recording.cjs`
+- `tests/check_trace.cjs`
+- `tests/check_trace_native.py`
+- `tests/test_recording.py`
+- `tests/test_trace.py`
 
-## 不再附带的旧证据文件
-
-无。
-
-`CHANGED_FILES.md`与`MANIFEST.sha256`在本轮重生成。每个交付文件的SHA256（除manifest本身）列于MANIFEST。现用目录已获用户授权安装并重启，详情见INSTALL_REPORT。
+完整源文件SHA256见MANIFEST.sha256。原始素材、BAT和VBS字节不变。
