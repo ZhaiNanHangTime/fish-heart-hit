@@ -1,0 +1,1 @@
+{"native_cases": 16, "long_history_hours": 8, "curve_coordinates": "PASS", "last_point_connected": "PASS", "empty_trace_hidden": "PASS", "live_service_accessed": false}

@@ -259,17 +259,23 @@ function currentTrace(samples) {
   const seconds=P.traceSeconds||180;
   return !DEMO&&state.trace?.seconds===seconds?state.trace:traceSeries(samples,seconds);
 }
+function traceViewport(width,height,center,amplitude) {
+  const stroke=Math.max(2,Math.round(height*.036)),shadow=Math.max(3,Math.round(height*.055)),dot=Math.max(2,Math.round(height*.028));
+  const inset=Math.ceil(Math.max(dot,shadow/2)+1);
+  return {x0:inset,x1:width-inset,amplitude:Math.max(0,Math.min(amplitude,center-inset,height-inset-center)),stroke,shadow,dot};
+}
 function drawTrace(samples, centerY, amp) {
   const series=currentTrace(samples);
-  const pts=series.points.map(([x,y])=>[1+x*(W-2),centerY-y*amp]);
+  const view=traceViewport(W,H,centerY,amp);
+  const pts=series.points.map(([x,y])=>[view.x0+x*(view.x1-view.x0),centerY-y*view.amplitude]);
   if (pts.length < 2) return;
 
   // 外侧暗描边 + 主红线（半透明：盖过鱼身也不挡视野）
-  ctx.lineJoin = 'miter';
+  ctx.lineJoin = 'bevel';
   ctx.lineCap = 'butt';
   ctx.globalAlpha = 0.50;
   ctx.strokeStyle = PAL.traceDim;
-  ctx.lineWidth = Math.max(3, Math.round(H * 0.055));
+  ctx.lineWidth = view.shadow;
   ctx.beginPath();
   ctx.moveTo(pts[0][0], pts[0][1]);
   for (const [x, y] of pts.slice(1)) ctx.lineTo(x, y);
@@ -277,7 +283,7 @@ function drawTrace(samples, centerY, amp) {
 
   ctx.globalAlpha = 0.88;
   ctx.strokeStyle = PAL.trace;
-  ctx.lineWidth = Math.max(2, Math.round(H * 0.036));
+  ctx.lineWidth = view.stroke;
   ctx.beginPath();
   ctx.moveTo(pts[0][0], pts[0][1]);
   for (const [x, y] of pts.slice(1)) ctx.lineTo(x, y);
@@ -286,7 +292,7 @@ function drawTrace(samples, centerY, amp) {
 
   // 最右端的心跳亮点
   const [lx, ly] = pts[pts.length - 1];
-  const dot = Math.max(2, Math.round(H * 0.028));
+  const dot = view.dot;
   px(lx - dot, ly - dot, dot * 2, dot * 2, '#ffffff');
 }
 

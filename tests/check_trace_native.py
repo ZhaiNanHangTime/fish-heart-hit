@@ -4,7 +4,7 @@ import json,math,os,sys
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import heartrate_hud as hud
-from hr_visual import trace_series
+from hr_visual import trace_series, trace_viewport
 
 samples=[[i,72+6*math.sin(i/18)+2*math.cos(i/3)] for i in range(8*3600)]
 class Feed:
@@ -26,9 +26,11 @@ with patch.object(hud,'SnapshotClient',Feed),patch.object(hud.HeartHud,'_restore
                     series=trace_series(samples,seconds);window.stream.data['trace']=series
                     window._tick();window._draw_trace()
                     coords=window.canvas.coords(window.trace)
-                    expected=[value for x,y in series['points'] for value in (1+x*(window.w-2),window.center_y-y*window.amp)]
+                    view=trace_viewport(window.w,window.h,window.center_y,window.amp)
+                    expected=[value for x,y in series['points'] for value in (view['x0']+x*(view['x1']-view['x0']),window.center_y-y*view['amplitude'])]
                     assert coords==expected
-                    assert coords[-2]==size[0]-1
+                    assert coords[-2]==view['x1']
+                    assert window.canvas.itemcget(window.trace,'joinstyle')=='bevel'
                     assert window.canvas.coords(window.trace_shadow)==coords
                     records.append({'width':size[0],'height':size[1],'traceLayout':mode,'seconds':seconds,'series':series,'coords':coords,'dot':window.canvas.coords(window.trace_dot),'stroke':float(window.canvas.itemcget(window.trace,'width')),'shadow_stroke':float(window.canvas.itemcget(window.trace_shadow,'width'))})
         window.history=[];window.state['trace']=trace_series([],180);hud.P['traceSeconds']=180;window._draw_trace()

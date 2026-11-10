@@ -33,10 +33,12 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from hr_config import DEFAULT_PARAMS, LIMITS
 from hr_client import SnapshotClient
-from hr_visual import layout as visual_layout, sprite_png, trace_series
+from hr_visual import layout as visual_layout, sprite_png, trace_series, trace_viewport
 
 HERE = Path(__file__).resolve().parent
-SETTINGS = HERE / "hud.json"
+from hr_paths import DATA_DIR, process_args
+
+SETTINGS = DATA_DIR / "hud.json"
 TRANSPARENT_KEY = "#ff00fe"
 
 FONT = {
@@ -277,10 +279,10 @@ class HeartHud:
 
         # 心率线（最底层）
         self.trace_shadow = self.canvas.create_line(0, 0, 0, 0, fill='#a01f18',
-                                             width=3, capstyle='butt', joinstyle='miter')
+                                             width=3, capstyle='butt', joinstyle='bevel')
         self.trace = self.canvas.create_line(0, 0, 0, 0, fill=TRACE,
                                              width=max(3, self.scale + 1),
-                                             capstyle='butt', joinstyle='miter')
+                                             capstyle='butt', joinstyle='bevel')
         self.trace_dot = self._new(max(3, self.scale * 1.4))
 
         self.fx_items = [self._new() for _ in range(9)]
@@ -544,7 +546,7 @@ class HeartHud:
     def _open_adjustments(self):
         # Reuse the one control window, whose preview uses this HUD's exact layout.
         from urllib.parse import urlsplit
-        subprocess.Popen([sys.executable,str(HERE/'app_launcher.py'),'--port',str(urlsplit(self.base).port or 8080),'--panel','hud-size'],
+        subprocess.Popen(process_args('app_launcher.py','--port',str(urlsplit(self.base).port or 8080),'--panel','hud-size'),
                          cwd=str(HERE),creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
 
     def _toggle_topmost(self) -> None:
@@ -872,14 +874,15 @@ class HeartHud:
                 self._hide(item)
             self._hide(self.trace_dot)
             return
-        points = [(1+x*(self.w-2), self.center_y-y*self.amp) for x,y in normalized]
+        view = trace_viewport(self.w, self.h, self.center_y, self.amp)
+        points = [(view['x0']+x*(view['x1']-view['x0']), self.center_y-y*view['amplitude'])
+                  for x,y in normalized]
         coords = [value for point in points for value in point]
-        for item, width in [(self.trace_shadow, max(3, math.floor(self.h*.055+.5))),
-                            (self.trace, max(2, math.floor(self.h*.036+.5)))]:
+        for item, width in [(self.trace_shadow, view['shadow']), (self.trace, view['stroke'])]:
             self.canvas.coords(item, *coords)
             self.canvas.itemconfig(item, width=width, state='normal')
         x,y = points[-1]
-        dot = max(2, math.floor(self.h*.028+.5))
+        dot = view['dot']
         self._show(self.trace_dot, '#ffffff', x-dot, y-dot, dot*2)
 
     def _update_algo(self, bpm, dt: float) -> None:

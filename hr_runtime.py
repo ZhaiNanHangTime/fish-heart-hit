@@ -7,6 +7,7 @@ import secrets
 import subprocess
 import sys
 from pathlib import Path
+from hr_paths import process_args
 
 APP_ID = "fish-heart-hit"
 CONTROL_PROTOCOL = 2
@@ -71,8 +72,8 @@ class RuntimeControl:
                 folder.mkdir(exist_ok=True)
                 with (folder / 'hud.log').open('ab') as output:
                     self.child = self.spawn(
-                        [sys.executable, str(self.root/'heartrate_hud.py'), '--api', self.api+'/hr',
-                         '--scale', str(scale), '--managed'], cwd=str(self.root), stdin=subprocess.PIPE,
+                        process_args('heartrate_hud.py','--api',self.api+'/hr','--scale',str(scale),
+                                     '--managed',source_dir=self.root), cwd=str(self.root), stdin=subprocess.PIPE,
                         stdout=output, stderr=output,
                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
                 self.error = ""

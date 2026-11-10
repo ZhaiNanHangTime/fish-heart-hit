@@ -13,8 +13,9 @@ import webbrowser
 from pathlib import Path
 from urllib.request import Request, urlopen
 from hr_runtime import APP_ID, CONTROL_PROTOCOL, root_id
+from hr_paths import DATA_DIR, FROZEN, process_args
 
-HERE = Path(__file__).resolve().parent
+HERE = DATA_DIR
 
 class StartupBusy(Exception): pass
 
@@ -80,6 +81,8 @@ def ensure_service(root, port=8080, timeout=15):
     current=health(base)
     if current:
         if current.get('app')==APP_ID and current.get('control_protocol')==CONTROL_PROTOCOL:
+            if FROZEN and current.get('root_id') != root_id(root):
+                raise RuntimeError('旧版心率后台仍在运行。请在旧总控结束本次运行，然后重新开播。')
             # Reuse the same compatible service, including when a second release copy is clicked.
             return base
         raise RuntimeError(f'{port}端口仍由旧版程序使用。请先在旧目录双击停止脚本，关闭旧控制台，再重新打开本文件。原数据无需删除。')
@@ -88,10 +91,8 @@ def ensure_service(root, port=8080, timeout=15):
         if probe.connect_ex(('127.0.0.1',port))==0:
             raise RuntimeError(f'{port}端口已被其他程序使用，请关闭占用程序后重试。')
     folder=root/'runtime';folder.mkdir(exist_ok=True)
-    python=sys.executable
-    if Path(python).name.lower()=='pythonw.exe': python=str(Path(python).with_name('python.exe'))
     with (folder/'service.log').open('ab') as output:
-        child=subprocess.Popen([python,str(root/'heartrate_live.py'),'--port',str(port),'--history','2400'],
+        child=subprocess.Popen(process_args('heartrate_live.py','--port',str(port),'--history','2400',console=True,source_dir=root),
                                cwd=str(root),stdout=output,stderr=output,
                                creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     deadline=time.monotonic()+timeout
@@ -129,13 +130,14 @@ def show_hud(base):
         raise RuntimeError(state.get('error') or '悬浮窗未能打开，请在总控中重试。')
     return state
 
-def main():
+def main(before_start=None):
     parser=argparse.ArgumentParser()
     parser.add_argument('--port',type=int,default=8080)
     parser.add_argument('--stop',action='store_true')
     parser.add_argument('--check',action='store_true')
     parser.add_argument('--no-browser',action='store_true')
     parser.add_argument('--hud',action='store_true',help='同时打开受总控管理的桌面悬浮窗')
+    parser.add_argument('--no-update',action='store_true',help='本次跳过 Velopack 更新检查')
     parser.add_argument('--panel',choices=['hud-size','effects'],help='聚焦现有总控的可视化调整区')
     args=parser.parse_args()
     try:
@@ -158,7 +160,10 @@ def main():
             req=Request(base+'/control/shutdown',data=b'{}',headers={'Content-Type':'application/json','X-Control-Token':token})
             with urlopen(req,timeout=4) as response: response.read()
             return 0
-        with startup_lock(HERE):
+        lock_root = HERE.parent if FROZEN else HERE
+        with startup_lock(lock_root):
+            if before_start is not None and not before_start(args):
+                return 0
             base=ensure_service(HERE,args.port)
             if args.panel: show_panel(base,args.panel)
             if not args.no_browser: open_control(base)

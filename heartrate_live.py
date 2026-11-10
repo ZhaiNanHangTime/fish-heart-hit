@@ -35,6 +35,7 @@ from aiohttp import web
 from hr_config import DEFAULT_PARAMS, GROUPS, merge_params
 from hr_baseline import Baseline
 from hr_runtime import RuntimeControl, APP_ID, CONTROL_PROTOCOL, root_id
+from hr_paths import DATA_DIR, FROZEN
 from hr_visual import layout as visual_layout, sprite_png, FRAMES, trace_series
 from hr_devices import DeviceManager
 from hr_recording import ActivityRecorder, ACTIVITIES, describe_log
@@ -44,8 +45,8 @@ HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb"
 BATTERY_LEVEL = "00002a19-0000-1000-8000-00805f9b34fb"
 DEFAULT_ADDRESS = None        # 留空 = 自动扫描带心率广播的设备（不写死任何人的手环）
 HERE = Path(__file__).resolve().parent
-PARAMS_FILE = HERE / "params.json"
-DEVICES_FILE = HERE / "devices.json"      # 记住连成功过的心率设备（已 gitignore）
+PARAMS_FILE = DATA_DIR / "params.json"
+DEVICES_FILE = DATA_DIR / "devices.json"      # 记住连成功过的心率设备（已 gitignore）
 
 
 def load_known_devices() -> list[str]:
@@ -133,7 +134,7 @@ class Hub:
 
         self.queues: set[asyncio.Queue] = set()
         self.recording = ActivityRecorder()
-        self.log_directory = HERE / 'logs'
+        self.log_directory = DATA_DIR / 'logs' if FROZEN else HERE / 'logs'
 
     # ---------- data intake ----------
 
@@ -500,7 +501,7 @@ def build_app(hub: Hub, runtime=None) -> web.Application:
 
     async def health(_request: web.Request) -> web.Response:
         return web.json_response({"ok": True, "connected": hub.connected,
-            "app":APP_ID, "control_protocol":CONTROL_PROTOCOL, "root_id":root_id(HERE)})
+            "app":APP_ID, "control_protocol":CONTROL_PROTOCOL, "root_id":root_id(DATA_DIR if FROZEN else HERE)})
 
     def require_control(request, mutation=False):
         if runtime is None:
@@ -694,7 +695,7 @@ async def main_async(args: argparse.Namespace) -> None:
 
     hub.devices = DeviceManager(hub, DEVICES_FILE, parse_bpm, address, args.name,
                                 on_switch=new_device_session)
-    runtime = RuntimeControl(HERE, f"http://127.0.0.1:{args.port}",stop,hub.publish)
+    runtime = RuntimeControl(DATA_DIR if FROZEN else HERE, f"http://127.0.0.1:{args.port}",stop,hub.publish)
     runner = web.AppRunner(build_app(hub,runtime), shutdown_timeout=1)
     await runner.setup()
     await web.TCPSite(runner, args.host, args.port).start()
@@ -843,7 +844,7 @@ def main() -> None:
     parser.add_argument("--danger", type=float, default=None, help="bpm for 'alarm' state")
     parser.add_argument("--stale-after", type=float, default=12.0)
     parser.add_argument("--history", type=int, default=600, help="rolling samples to keep")
-    parser.add_argument("--csv-dir", default=str(HERE / "logs"))
+    parser.add_argument("--csv-dir", default=str(DATA_DIR / "logs"))
     parser.add_argument("--no-csv", action="store_true")
     parser.add_argument("--forget", action="store_true",
                         help="清掉 devices.json 里记住的设备地址后退出")

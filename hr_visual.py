@@ -18,6 +18,17 @@ def pixel(value):
     return math.floor(value+.5)
 
 
+def trace_viewport(width, height, center, amplitude):
+    """Reserve space for the whole stroke and square endpoint, not just centers."""
+    stroke = max(2, pixel(height*.036))
+    shadow = max(3, pixel(height*.055))
+    dot = max(2, pixel(height*.028))
+    inset = math.ceil(max(dot, shadow/2)+1)
+    return {'x0': inset, 'x1': width-inset,
+            'amplitude': max(0, min(amplitude, center-inset, height-inset-center)),
+            'stroke': stroke, 'shadow': shadow, 'dot': dot}
+
+
 def trace_series(samples, seconds=180):
     """Clip by time before smoothing/scaling; normalize once for both outputs.
 

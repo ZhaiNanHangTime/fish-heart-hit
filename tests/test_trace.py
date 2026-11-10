@@ -4,11 +4,21 @@ from pathlib import Path
 import sys
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from hr_visual import trace_series
+from hr_visual import trace_series, trace_viewport
 from hr_config import DEFAULT_PARAMS, merge_params
 
 
 class TraceTests(unittest.TestCase):
+    def test_stroke_and_endpoint_fit_even_small_or_tall_outputs(self):
+        for width,height in [(160,64),(381,95),(640,280),(1920,1080)]:
+            for cy,amp in [(height*.5,height*.44),(height*.78,height*.15)]:
+                view=trace_viewport(width,height,cy,amp)
+                radius=max(view['dot'],view['shadow']/2)
+                self.assertGreater(view['x0']-radius,0)
+                self.assertLess(view['x1']+radius,width)
+                self.assertGreater(cy-view['amplitude']-radius,0)
+                self.assertLess(cy+view['amplitude']+radius,height)
+
     def test_long_running_history_keeps_visible_detail_and_latest_endpoint(self):
         samples=[[i,75+8*math.sin(i/10)] for i in range(8*3600)]
         short=trace_series(samples[-181:],180)

@@ -1,3 +1,17 @@
+# Windows 安装与自动更新
+
+下载 GitHub Release 的 Windows Setup。先从旧总控结束本次运行，再双击安装。第一次启动选择「是」，然后选择旧程序目录。程序会复制设备、外观、悬浮窗位置和心率记录，保留旧文件，并将原「一键开播（总控+悬浮窗）.vbs」接到新版。也可使用安装器创建的桌面快捷方式。首次全新使用可选择「否」。
+
+以后双击开播，Velopack 会在后台启动前检查 GitHub 正式发布，下载新版并在备份之后安装，再打开总控与悬浮窗。遇到网络错误时启动本地版。后台已在运行时直接复用，留到下次冷启动更新。安装版包含 Python 运行时。
+
+安装版的数据在 `%LOCALAPPDATA%\FishHeartHitData\profile`，备份在同级 `backups`，更新日志为同级 `runtime\velopack.log`。
+
+维护者在 Windows x64 上安装 `requirements-build.txt`，使用同版本 Velopack vpk，运行 `python -B build_desktop.py --vpk 路径\vpk.exe --output 路径\build`。更新 `RELEASE_VERSION` 后为同一提交打 `vX.Y.Z` 标签，并把 `build/release` 中的 Setup、完整 `.nupkg` 与 `releases.win.json` 上传到正式 GitHub Release 并设为 Latest。
+
+# 修复：曲线边缘显示不完整
+
+已给曲线描边和末端亮点留出安全空间，并消除尖角越界。悬浮窗与预览同步，时间范围保持。更新后刷新总控及OBS来源一次。[说明](TRACE_EDGE_FIX.md)。
+
 # 新增：统一曲线与时间范围
 
 总控“角色与画面 → 曲线时间范围”，默认显示最近3分钟，预览后点应用，与桌面悬浮窗和OBS同步。修复后台运行越久曲线越稀疏的问题。[详细说明](TRACE_SYNC.md)。
