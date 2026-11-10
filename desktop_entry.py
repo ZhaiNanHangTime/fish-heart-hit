@@ -1,16 +1,40 @@
 """Windows package entry and Velopack startup integration."""
+from contextlib import contextmanager
 from datetime import datetime
 import logging
 from logging.handlers import RotatingFileHandler
+import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import sys
 import tempfile
+from urllib.request import getproxies
 
 from hr_paths import DATA_DIR
 
 RELEASE_FEED = 'https://github.com/ZhaiNanHangTime/fish-heart-hit/releases/latest/download/'
+
+
+@contextmanager
+def system_proxy():
+    """Give Velopack Windows proxy settings when the user set them only in Settings."""
+    added = []
+    proxies = getproxies()
+    for scheme in ('http', 'https'):
+        key = scheme.upper()+'_PROXY'
+        if key not in os.environ and proxies.get(scheme):
+            os.environ[key] = proxies[scheme]
+            added.append(key)
+    if added and 'NO_PROXY' not in os.environ:
+        os.environ['NO_PROXY'] = 'localhost,127.0.0.1'
+        added.append('NO_PROXY')
+    try:
+        yield
+    finally:
+        for key in added:
+            os.environ.pop(key, None)
 
 
 def backup_before_update():
@@ -49,16 +73,17 @@ def prepare_start(args):
     log.addHandler(handler)
     log.setLevel(logging.INFO)
     try:
-        source = velopack.HttpSource(RELEASE_FEED, velopack.HttpOptions([], 6000))
-        manager = velopack.UpdateManager(source)
-        update = manager.check_for_updates()
-        if update is None:
-            return True
-        version = update.TargetFullRelease.Version
-        log.info('Downloading %s', version)
-        source = velopack.HttpSource(RELEASE_FEED, velopack.HttpOptions([], 90000))
-        manager = velopack.UpdateManager(source)
-        manager.download_updates(update)
+        with system_proxy():
+            source = velopack.HttpSource(RELEASE_FEED, velopack.HttpOptions([], 6000))
+            manager = velopack.UpdateManager(source)
+            update = manager.check_for_updates()
+            if update is None:
+                return True
+            version = update.TargetFullRelease.Version
+            log.info('Downloading %s', version)
+            source = velopack.HttpSource(RELEASE_FEED, velopack.HttpOptions([], 90000))
+            manager = velopack.UpdateManager(source)
+            manager.download_updates(update)
         if port_in_use(args.port):
             log.info('A service is running. Deferring update until the next launch.')
             return True
@@ -67,7 +92,7 @@ def prepare_start(args):
         manager.apply_updates_and_restart_with_args(update, [*sys.argv[1:], '--no-update'])
         return False
     except Exception as exc:
-        log.warning('Update deferred: %s', exc)
+        log.warning('Update deferred: %s', re.sub(r'https?://\S+', '[URL]', str(exc)))
         return True
     finally:
         log.removeHandler(handler)

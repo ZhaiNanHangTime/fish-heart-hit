@@ -1,3 +1,7 @@
+## 1.0.1 · Windows 系统代理
+
+- Velopack 检查与下载更新时沿用 Windows 设置中的代理。退出更新流程后恢复启动进程的原环境。
+
 ## 1.0.0 · Velopack 安装与自动更新
 
 - Windows 安装版使用 Velopack 从 GitHub 更新，备份后重启到总控和悬浮窗。
